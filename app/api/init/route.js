@@ -1,7 +1,7 @@
 
 import { NextResponse } from "next/server";
 import { ensureSchema } from "../../../lib/schema";
-import { defaultBanks, defaultSettings } from "../../../lib/defaults";
+import { defaultBanks, defaultSettings, defaultBankLogos } from "../../../lib/defaults";
 import { query } from "../../../lib/db";
 
 export async function POST() {
@@ -15,11 +15,19 @@ export async function POST() {
     }
 
     for (let i = 0; i < defaultBanks.length; i++) {
+      const bankName = defaultBanks[i];
+      const presetLogo = defaultBankLogos[bankName] || null;
+
       await query(
-        `INSERT INTO banks (name, enabled, sort_order)
-         VALUES ($1, TRUE, $2)
-         ON CONFLICT (name) DO NOTHING`,
-        [defaultBanks[i], i]
+        `INSERT INTO banks (name, enabled, sort_order, logo_data_url)
+         VALUES ($1, TRUE, $2, $3)
+         ON CONFLICT (name) DO UPDATE
+         SET logo_data_url = CASE
+           WHEN banks.logo_data_url IS NULL OR banks.logo_data_url = ''
+           THEN EXCLUDED.logo_data_url
+           ELSE banks.logo_data_url
+         END`,
+        [bankName, i, presetLogo]
       );
     }
 
