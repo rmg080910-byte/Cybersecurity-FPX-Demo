@@ -1,19 +1,37 @@
 
 import { NextResponse } from "next/server";
-import { ensureSchema } from "../../../lib/schema";
-import { query } from "../../../lib/db";
+import crypto from "crypto";
+import { makeAdminSession, adminCookieName, adminSessionMaxAge } from "../../../../../lib/adminAuth";
 
-export async function GET() {
-  await ensureSchema();
-  const r = await query(`SELECT id,name,enabled,sort_order,logo_data_url FROM banks ORDER BY sort_order,name`);
-  return NextResponse.json(r.rows);
+function sameText(a, b) {
+  const aa = Buffer.from(String(a || ""));
+  const bb = Buffer.from(String(b || ""));
+  if (aa.length !== bb.length) return false;
+  return crypto.timingSafeEqual(aa, bb);
 }
 
-export async function PUT(req) {
-  await ensureSchema();
-  const banks = await req.json();
-  for (const [i, b] of banks.entries()) {
-    await query(`UPDATE banks SET enabled=$1, sort_order=$2, logo_data_url=$3 WHERE id=$4`, [!!b.enabled, i, b.logo_data_url || null, b.id]);
+export async function POST(req) {
+  const body = await req.json();
+  const expected = process.env.ADMIN_PASSWORD;
+
+  if (!expected) {
+    return NextResponse.json(
+      { ok: false, error: "ADMIN_PASSWORD is not configured." },
+      { status: 500 }
+    );
   }
-  return NextResponse.json({ ok: true });
+
+  if (!sameText(body.password, expected)) {
+    return NextResponse.json({ ok: false, error: "Invalid password." }, { status: 401 });
+  }
+
+  const res = NextResponse.json({ ok: true });
+  res.cookies.set(adminCookieName, makeAdminSession(), {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    maxAge: adminSessionMaxAge,
+    path: "/",
+  });
+  return res;
 }
