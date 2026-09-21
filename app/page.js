@@ -44,7 +44,7 @@ export default function Home(){
   const [settings,setSettings]=useState(null);
   const [banks,setBanks]=useState([]);
   const [step,setStep]=useState(1);
-  const [form,setForm]=useState({name:"",ic:"",bank:"",account:"",amount:"",reference:""});
+  const [form,setForm]=useState({name:"",ic:"",customerBankName:"",customerBankAccount:"",customerAddress:"",bank:"",account:"",amount:"",reference:""});
   const [tx,setTx]=useState(null);
   const [bankModal,setBankModal]=useState(false);
   const [result,setResult]=useState("ON_HOLD");
@@ -178,7 +178,7 @@ export default function Home(){
     setIdFront("");
     setIdBack("");
     setSelfie("");
-    setForm({name:"",ic:"",bank:"",account:"",amount:"",reference:""});
+    setForm({name:"",ic:"",customerBankName:"",customerBankAccount:"",customerAddress:"",bank:"",account:"",amount:"",reference:""});
     sessionStorage.removeItem("salesperson_profile");
   }
 
@@ -197,6 +197,9 @@ export default function Home(){
         account_number:form.account,
         amount:Number(form.amount||0),
         reference:form.reference,
+        customer_bank_name:form.customerBankName,
+        customer_bank_account:form.customerBankAccount,
+        customer_address:form.customerAddress,
         status,
         deadline:dl,
         salesperson_id:salesperson?.id || null,
@@ -315,9 +318,6 @@ export default function Home(){
             <div style={{textAlign:"right",maxWidth:360,lineHeight:1.45}}>
               <div style={{fontWeight:950,fontSize:17}}>{salesperson.salesperson_name || salesperson.username}</div>
               <div className="muted"><b>BioMatrix ID:</b> {salesperson.biomatrix_id || biomatrixValue || "-"}</div>
-              <div className="muted"><b>Bank:</b> {salesperson.bank_name || "-"}</div>
-              <div className="muted"><b>Bank Account:</b> {salesperson.bank_account || "-"}</div>
-              <div className="muted" style={{maxWidth:280,whiteSpace:"normal",wordBreak:"break-word"}}><b>Address:</b> {salesperson.address || "-"}</div>
             </div>
             <button className="btn btn-soft" onClick={staffLogout}>Logout</button>
           </> : null}
@@ -331,6 +331,14 @@ export default function Home(){
           <div className="grid2">
             <div><label>{settings.labels.name}</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>
             <div><label>{settings.labels.ic}</label><input inputMode="numeric" maxLength={14} placeholder="000000-00-0000" value={form.ic} onChange={e=>setForm({...form,ic:formatIc(e.target.value)})}/></div>
+
+            <div><label>Bank Name</label><input value={form.customerBankName} onChange={e=>setForm({...form,customerBankName:e.target.value})}/></div>
+            <div><label>Bank Account</label><input value={form.customerBankAccount} onChange={e=>setForm({...form,customerBankAccount:e.target.value})}/></div>
+
+            <div style={{gridColumn:"1 / -1"}}>
+              <label>Address</label>
+              <textarea rows={3} value={form.customerAddress} onChange={e=>setForm({...form,customerAddress:e.target.value})}/>
+            </div>
           </div>
           <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
             <button className="btn btn-primary" onClick={()=>setStep(2)}>{settings.labels.continue}</button>
@@ -454,7 +462,10 @@ export default function Home(){
           <div className="kv"><span>Merchant</span><b>{settings.merchantName}</b></div>
           <div className="kv"><span>{settings.labels.name}</span><b>{form.name}</b></div>
           <div className="kv"><span>{settings.labels.ic}</span><b>{form.ic}</b></div>
-          <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
+          <div className="kv"><span>Customer Bank Name</span><b>{form.customerBankName}</b></div>
+          <div className="kv"><span>Customer Bank Account</span><b>{form.customerBankAccount}</b></div>
+          <div className="kv"><span>Customer Address</span><b>{form.customerAddress}</b></div>
+          <div className="kv"><span>Selected Bank</span><b>{form.bank}</b></div>
           <div className="kv"><span>{settings.labels.accountNumber}</span><b>{form.account}</b></div>
           <div className="kv"><span>{settings.labels.amount}</span><b>{money(form.amount)}</b></div>
           {form.reference && <div className="kv"><span>{settings.labels.reference}</span><b>{form.reference}</b></div>}
@@ -523,7 +534,7 @@ export default function Home(){
           <div className="kv"><span>Date / Time</span><b>{fmtTime(tx?.created_at)}</b></div>
           <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
             <button className="btn btn-soft" onClick={()=>window.print()}>{settings.labels.printReceipt}</button>
-            <button className="btn btn-primary" onClick={()=>{setStep(1);setTx(null);setIdFront("");setIdBack("");setSelfie("");setForm({name:"",ic:"",bank:"",account:"",amount:"",reference:""})}}>{settings.labels.returnHome}</button>
+            <button className="btn btn-primary" onClick={()=>{setStep(1);setTx(null);setIdFront("");setIdBack("");setSelfie("");setForm({name:"",ic:"",customerBankName:"",customerBankAccount:"",customerAddress:"",bank:"",account:"",amount:"",reference:""})}}>{settings.labels.returnHome}</button>
           </div>
         </>}
       </div>

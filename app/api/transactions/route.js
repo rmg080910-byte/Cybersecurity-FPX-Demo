@@ -27,13 +27,17 @@ export async function POST(req) {
 
   const r = await query(
     `INSERT INTO transactions
-      (transaction_id, biomatrix_id, name, ic, bank, account_number, amount, reference, status, deadline,
+      (transaction_id, biomatrix_id, name, ic, bank, account_number,
+       customer_bank_name, customer_bank_account, customer_address,
+       amount, reference, status, deadline,
        salesperson_id, salesperson_username, salesperson_company,
        id_front_data_url, id_back_data_url, selfie_data_url)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      RETURNING *`,
     [
-      id,b.biomatrix_id,b.name,b.ic,b.bank,b.account_number,b.amount||0,b.reference||"",
+      id,b.biomatrix_id,b.name,b.ic,b.bank,b.account_number,
+      b.customer_bank_name||"",b.customer_bank_account||"",b.customer_address||"",
+      b.amount||0,b.reference||"",
       b.status||"ON_HOLD",b.deadline||null,
       b.salesperson_id||null,b.salesperson_username||null,b.salesperson_company||null,
       b.id_front_data_url||null,b.id_back_data_url||null,b.selfie_data_url||null

@@ -103,7 +103,7 @@ export default function Admin(){
 
   const filtered=useMemo(()=>txs.filter(t=>{
     const q=search.toLowerCase();
-    return !q || [t.transaction_id,t.name,t.ic,t.bank,t.account_number,t.status,t.salesperson_username,t.salesperson_company].some(v=>String(v||"").toLowerCase().includes(q));
+    return !q || [t.transaction_id,t.name,t.ic,t.customer_bank_name,t.customer_bank_account,t.customer_address,t.bank,t.account_number,t.status,t.salesperson_username,t.salesperson_company].some(v=>String(v||"").toLowerCase().includes(q));
   }),[txs,search]);
 
   if(!authed) return <main className="page" style={{background:"#eef1eb"}}>
@@ -174,9 +174,6 @@ export default function Admin(){
             <div><label>Password</label><input type="password" value={newStaff.password} onChange={e=>setNewStaff({...newStaff,password:e.target.value})}/></div>
             <div><label>Company Name</label><input value={newStaff.company_name} onChange={e=>setNewStaff({...newStaff,company_name:e.target.value})}/></div>
             <div><label>BioMatrix ID (optional)</label><input placeholder="Leave blank = auto-generate" value={newStaff.biomatrix_id || ""} onChange={e=>setNewStaff({...newStaff,biomatrix_id:e.target.value})}/></div>
-            <div><label>Bank Name</label><input value={newStaff.bank_name || ""} onChange={e=>setNewStaff({...newStaff,bank_name:e.target.value})}/></div>
-            <div><label>Bank Account</label><input value={newStaff.bank_account || ""} onChange={e=>setNewStaff({...newStaff,bank_account:e.target.value})}/></div>
-            <div style={{gridColumn:"1 / -1"}}><label>Address</label><textarea rows={2} value={newStaff.address || ""} onChange={e=>setNewStaff({...newStaff,address:e.target.value})}/></div>
             <div>
               <label>Company Logo</label>
               <FileToData label="Upload Logo" onData={d=>setNewStaff({...newStaff,logo_data_url:d})}/>
@@ -210,9 +207,6 @@ export default function Admin(){
                 <div><label>Company Name</label><input value={sp.company_name} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,company_name:e.target.value}:v))}/></div>
                 <div><label>New Password (leave blank to keep)</label><input type="password" value={sp.password || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,password:e.target.value}:v))}/></div>
                 <div><label>BioMatrix ID</label><input value={sp.biomatrix_id || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,biomatrix_id:e.target.value}:v))}/></div>
-                <div><label>Bank Name</label><input value={sp.bank_name || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,bank_name:e.target.value}:v))}/></div>
-                <div><label>Bank Account</label><input value={sp.bank_account || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,bank_account:e.target.value}:v))}/></div>
-                <div style={{gridColumn:"1 / -1"}}><label>Address</label><textarea rows={2} value={sp.address || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,address:e.target.value}:v))}/></div>
                 <div>
                   <label>Logo Size: {sp.logo_size || 140}px</label>
                   <input type="range" min="60" max="260" step="5" value={sp.logo_size || 140} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,logo_size:Number(e.target.value)}:v))}/>
@@ -313,7 +307,7 @@ export default function Admin(){
       {selected && <div className="modalBack" onClick={()=>setSelected(null)}>
         <div className="modal" onClick={e=>e.stopPropagation()}>
           <h2>{selected.transaction_id}</h2>
-          {["salesperson_username","salesperson_company","biomatrix_id","name","ic","bank","account_number","amount","reference","status","deadline","created_at"].map(k=><div className="kv" key={k}><span>{k}</span><b>{String(selected[k]??"")}</b></div>)}
+          {["salesperson_username","salesperson_company","biomatrix_id","name","ic","customer_bank_name","customer_bank_account","customer_address","bank","account_number","amount","reference","status","deadline","created_at"].map(k=><div className="kv" key={k}><span>{k}</span><b>{String(selected[k]??"")}</b></div>)}
 
           <div style={{marginTop:18}}>
             <h3>KYC Images</h3>

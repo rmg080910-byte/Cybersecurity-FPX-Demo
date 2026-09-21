@@ -1,12 +1,25 @@
-STAFF SAVE RELIABLE PATCH
+CUSTOMER BANK / ACCOUNT / ADDRESS PATCH
 
-Changed files:
-- app/admin/page.js
-- app/api/salespersons/route.js
+Fixes the field ownership:
 
-Fixes:
-- Save button now shows Saving...
-- Success shows a confirmation alert.
-- Server/API errors are shown instead of silently failing.
-- PUT route validates User ID and Company Name and returns clear errors.
-- Bank Name, Bank Account, Address, BioMatrix ID, Salesperson Name and Logo Size are all saved in the same request.
+STAFF / SALESPERSON:
+- User ID
+- Salesperson Name
+- Company Name
+- Password
+- BioMatrix ID
+- Logo / Logo Size
+- Status
+
+CUSTOMER / PERSON on the frontend:
+- Name
+- IC / Identification No.
+- Bank Name
+- Bank Account
+- Address
+
+Also:
+- Top-right staff header now only shows Salesperson Name + BioMatrix ID.
+- Customer Bank Name / Bank Account / Address are saved into the transaction.
+- Admin > Transactions > Open shows the customer fields.
+- Staff admin no longer asks staff to fill Bank Name / Bank Account / Address.
