@@ -1,6 +1,6 @@
 
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 const money = (v) => `RM ${Number(v||0).toLocaleString("en-MY",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const fmtTime = (v) => v ? new Intl.DateTimeFormat("en-MY",{dateStyle:"medium",timeStyle:"medium",timeZone:"Asia/Kuala_Lumpur"}).format(new Date(v)) : "";
@@ -66,7 +66,6 @@ export default function Home(){
   const [linkBusy,setLinkBusy]=useState(false);
   const [linkError,setLinkError]=useState("");
   const [linkProgress,setLinkProgress]=useState(0);
-  const autoLinkStartedRef=useRef(false);
 
   useEffect(()=>{
     (async()=>{
@@ -186,7 +185,6 @@ export default function Home(){
     setUploadLink("");
     setLinkError("");
     setLinkProgress(0);
-    autoLinkStartedRef.current=false;
     setForm({name:"",ic:"",customerBankName:"",customerBankAccount:"",customerAddress:"",bank:"",account:"",amount:"",reference:""});
     sessionStorage.removeItem("salesperson_profile");
   }
@@ -199,110 +197,97 @@ export default function Home(){
     form.customerAddress.trim()
   );
 
-  async function startUploadLinkFlow(){
-    if(!customerDetailsReady || linkBusy) return;
+  async function requestUploadLink() {
+    const r = await fetch("/api/upload-links", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        transaction_id: tx?.id || null,
+        biomatrix_id: biomatrixValue,
+        name: form.name,
+        ic: form.ic,
+        customer_bank_name: form.customerBankName,
+        customer_bank_account: form.customerBankAccount,
+        customer_address: form.customerAddress,
+        salesperson_id: salesperson?.id || null,
+        salesperson_username: salesperson?.username || null,
+        salesperson_company: salesperson?.company_name || null
+      })
+    });
+
+    const contentType = r.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      throw new Error(`Upload link API unavailable (HTTP ${r.status}).`);
+    }
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Unable to generate upload link.");
+    return data;
+  }
+
+  async function startUploadLinkFlow() {
+    if (!customerDetailsReady || linkBusy) return;
 
     setStep(10);
     setUploadLink("");
     setLinkError("");
-    setLinkBusy(true);
     setLinkProgress(1);
+    setLinkBusy(true);
 
-    const startedAt = Date.now();
-    let finished = false;
-
-    const timer = setInterval(()=>{
-      const elapsed = Date.now() - startedAt;
-      const pct = Math.min(95, Math.max(1, Math.floor((elapsed / 2500) * 95)));
-      setLinkProgress(pct);
+    const started = Date.now();
+    const timer = setInterval(() => {
+      const elapsed = Date.now() - started;
+      setLinkProgress(Math.min(95, Math.max(1, Math.floor((elapsed / 2500) * 95))));
     }, 30);
 
-    try{
-      const request = fetch("/api/upload-links",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          transaction_id:tx?.id || null,
-          biomatrix_id:biomatrixValue,
-          name:form.name,
-          ic:form.ic,
-          customer_bank_name:form.customerBankName,
-          customer_bank_account:form.customerBankAccount,
-          customer_address:form.customerAddress,
-          salesperson_id:salesperson?.id || null,
-          salesperson_username:salesperson?.username || null,
-          salesperson_company:salesperson?.company_name || null
-        })
-      }).then(async r=>{
-        const contentType = r.headers.get("content-type") || "";
-        if(!contentType.includes("application/json")){
-          throw new Error(`Upload link API unavailable (HTTP ${r.status}).`);
-        }
-        const data = await r.json();
-        if(!r.ok) throw new Error(data.error || "Unable to generate upload link.");
-        return data;
-      });
-
+    try {
       const [data] = await Promise.all([
-        request,
-        new Promise(resolve=>setTimeout(resolve,2500))
+        requestUploadLink(),
+        new Promise(resolve => setTimeout(resolve, 2500))
       ]);
-
       clearInterval(timer);
-      finished = true;
       setLinkProgress(100);
-
-      if(data.transaction) setTx(data.transaction);
-
-      setTimeout(()=>{
+      if (data.transaction) setTx(data.transaction);
+      setTimeout(() => {
         setUploadLink(`${window.location.origin}${data.path}`);
         setLinkBusy(false);
-      }, 120);
-    }catch(e){
+      }, 100);
+    } catch (e) {
       clearInterval(timer);
-      if(!finished) setLinkProgress(100);
+      setLinkProgress(100);
       setLinkError(e.message || "Unable to generate upload link.");
       setLinkBusy(false);
     }
   }
 
-  async function createUploadLink(isAuto=false){
-    if(!customerDetailsReady){
-      setLinkError("Please complete Name, IC / Identification No., Bank Name, Bank Account and Address.");
-      if(isAuto) autoLinkStartedRef.current=false;
-      return;
-    }
-    setLinkBusy(true);
+  async function regenerateUploadLink() {
+    if (linkBusy) return;
+    setUploadLink("");
     setLinkError("");
-    try{
-      const r=await fetch("/api/upload-links",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          transaction_id:tx?.id || null,
-          biomatrix_id:biomatrixValue,
-          name:form.name,
-          ic:form.ic,
-          customer_bank_name:form.customerBankName,
-          customer_bank_account:form.customerBankAccount,
-          customer_address:form.customerAddress,
-          salesperson_id:salesperson?.id || null,
-          salesperson_username:salesperson?.username || null,
-          salesperson_company:salesperson?.company_name || null
-        })
-      });
-      const contentType = r.headers.get("content-type") || "";
-      if(!contentType.includes("application/json")){
-        throw new Error(`Upload link API unavailable (HTTP ${r.status}).`);
-      }
-      const data=await r.json();
-      if(!r.ok) throw new Error(data.error || "Unable to generate upload link.");
-      if(data.transaction) setTx(data.transaction);
-      setUploadLink(`${window.location.origin}${data.path}`);
-    }catch(e){
+    setLinkProgress(1);
+    setLinkBusy(true);
+
+    const started = Date.now();
+    const timer = setInterval(() => {
+      const elapsed = Date.now() - started;
+      setLinkProgress(Math.min(95, Math.max(1, Math.floor((elapsed / 2500) * 95))));
+    }, 30);
+
+    try {
+      const [data] = await Promise.all([
+        requestUploadLink(),
+        new Promise(resolve => setTimeout(resolve, 2500))
+      ]);
+      clearInterval(timer);
+      setLinkProgress(100);
+      if (data.transaction) setTx(data.transaction);
+      setTimeout(() => {
+        setUploadLink(`${window.location.origin}${data.path}`);
+        setLinkBusy(false);
+      }, 100);
+    } catch (e) {
+      clearInterval(timer);
+      setLinkProgress(100);
       setLinkError(e.message || "Unable to generate upload link.");
-      autoLinkStartedRef.current=false;
-    }finally{
       setLinkBusy(false);
     }
   }
@@ -536,12 +521,7 @@ export default function Home(){
                     <button className="btn btn-primary" onClick={copyUploadLink}>Copy Link</button>
                     <button
                       className="btn btn-soft"
-                      onClick={async ()=>{
-                        setUploadLink("");
-                        setLinkProgress(0);
-                        autoLinkStartedRef.current=false;
-                        setTimeout(()=>autoLinkStartedRef.current=false,0);
-                      }}
+                      onClick={regenerateUploadLink}
                       disabled={linkBusy}
                     >
                       Regenerate Link
