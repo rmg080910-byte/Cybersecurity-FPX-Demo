@@ -1,27 +1,23 @@
-STAFF PROFILE BANK/ADDRESS PATCH ONLY
+IDENTITY CARD + SELFIE STEP PATCH ONLY
 
-Changed files:
-- lib/schema.js
-- app/api/salespersons/route.js
-- app/api/salespersons/login/route.js
-- app/admin/page.js
+Changed file:
 - app/page.js
 
-Per staff editable fields:
-- Salesperson Name
-- BioMatrix ID
-- Bank Name
-- Bank Account
-- Address
-- Logo Size / Preview
+New flow:
+1. Payment Details
+2. Identity Verification
+   - Upload Identification Card Front
+   - Upload Identification Card Back
+   - Open Camera
+   - Take Selfie
+3. Select Bank
+5. Transaction Confirmation
+6. Verification
+7. Processing
+8. Result
+9. Receipt
 
-Frontend top-right shows in English:
-- Staff name
-- BioMatrix ID
-- Bank
-- Bank Account
-- Address
-
-This page.js also consolidates recent fixes: Login label, IC 000000-00-0000 limit, username case status rule, random internal verification code.
-
-After deploy, Logout then Login again to load the new profile fields.
+Important:
+- ID images and selfie are previewed only in the browser for this step.
+- This patch does not upload or store ID/selfie images on the server or database.
+- Camera access requires browser permission and HTTPS. Railway's public domain uses HTTPS.
