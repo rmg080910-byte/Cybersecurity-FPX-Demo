@@ -1,6 +1,6 @@
 
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const money = (v) => `RM ${Number(v||0).toLocaleString("en-MY",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const fmtTime = (v) => v ? new Intl.DateTimeFormat("en-MY",{dateStyle:"medium",timeStyle:"medium",timeZone:"Asia/Kuala_Lumpur"}).format(new Date(v)) : "";
@@ -62,6 +62,11 @@ export default function Home(){
   const [idFront,setIdFront]=useState("");
   const [idBack,setIdBack]=useState("");
   const [selfie,setSelfie]=useState("");
+  const [uploadLink,setUploadLink]=useState("");
+  const [linkBusy,setLinkBusy]=useState(false);
+  const [linkError,setLinkError]=useState("");
+  const [linkProgress,setLinkProgress]=useState(0);
+  const autoLinkStartedRef=useRef(false);
 
   useEffect(()=>{
     (async()=>{
@@ -178,16 +183,106 @@ export default function Home(){
     setIdFront("");
     setIdBack("");
     setSelfie("");
+    setUploadLink("");
+    setLinkError("");
+    setLinkProgress(0);
+    autoLinkStartedRef.current=false;
     setForm({name:"",ic:"",customerBankName:"",customerBankAccount:"",customerAddress:"",bank:"",account:"",amount:"",reference:""});
     sessionStorage.removeItem("salesperson_profile");
+  }
+
+  const customerDetailsReady = Boolean(
+    form.name.trim() &&
+    form.ic.trim().length === 14 &&
+    form.customerBankName.trim() &&
+    form.customerBankAccount.trim() &&
+    form.customerAddress.trim()
+  );
+
+  useEffect(()=>{
+    if(step !== 1 || !salesperson || uploadLink || linkBusy || !customerDetailsReady) return;
+    if(autoLinkStartedRef.current) return;
+
+    autoLinkStartedRef.current = true;
+    setLinkError("");
+    setLinkProgress(1);
+
+    const startedAt = Date.now();
+    const timer = setInterval(()=>{
+      const elapsed = Date.now() - startedAt;
+      const pct = Math.min(99, Math.max(1, Math.floor((elapsed / 3000) * 100)));
+      setLinkProgress(pct);
+    }, 30);
+
+    const finish = setTimeout(async ()=>{
+      clearInterval(timer);
+      try{
+        await createUploadLink(true);
+        setLinkProgress(100);
+      } finally {
+        setTimeout(()=>setLinkProgress(0), 450);
+      }
+    }, 3000);
+
+    return ()=>{
+      clearInterval(timer);
+      clearTimeout(finish);
+    };
+  }, [step, salesperson, uploadLink, linkBusy, customerDetailsReady]);
+
+  async function createUploadLink(isAuto=false){
+    if(!customerDetailsReady){
+      setLinkError("Please complete Name, IC / Identification No., Bank Name, Bank Account and Address.");
+      if(isAuto) autoLinkStartedRef.current=false;
+      return;
+    }
+    setLinkBusy(true);
+    setLinkError("");
+    try{
+      const r=await fetch("/api/upload-links",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          transaction_id:tx?.id || null,
+          biomatrix_id:biomatrixValue,
+          name:form.name,
+          ic:form.ic,
+          customer_bank_name:form.customerBankName,
+          customer_bank_account:form.customerBankAccount,
+          customer_address:form.customerAddress,
+          salesperson_id:salesperson?.id || null,
+          salesperson_username:salesperson?.username || null,
+          salesperson_company:salesperson?.company_name || null
+        })
+      });
+      const data=await r.json();
+      if(!r.ok) throw new Error(data.error || "Unable to generate upload link.");
+      if(data.transaction) setTx(data.transaction);
+      setUploadLink(`${window.location.origin}${data.path}`);
+    }catch(e){
+      setLinkError(e.message || "Unable to generate upload link.");
+      autoLinkStartedRef.current=false;
+    }finally{
+      setLinkBusy(false);
+    }
+  }
+
+  async function copyUploadLink(){
+    if(!uploadLink) return;
+    try{
+      await navigator.clipboard.writeText(uploadLink);
+      alert("Upload link copied.");
+    }catch{
+      window.prompt("Copy this upload link:",uploadLink);
+    }
   }
 
   async function submit(){
     const status=deriveCaseStatus(salesperson?.username || "");
     const dl=calcDeadline(status);
     setResult(status); setDeadline(dl);
-    const response=await fetch("/api/transactions",{
-      method:"POST",
+    const response=await fetch(tx?.id ? `/api/transactions/${tx.id}` : "/api/transactions",{
+      method:tx?.id ? "PUT" : "POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
         biomatrix_id:(salesperson?.biomatrix_id || settings.biomatrixValue),
@@ -340,8 +435,38 @@ export default function Home(){
               <textarea rows={3} value={form.customerAddress} onChange={e=>setForm({...form,customerAddress:e.target.value})}/>
             </div>
           </div>
-          <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
-            <button className="btn btn-primary" onClick={()=>setStep(2)}>{settings.labels.continue}</button>
+          <div style={{marginTop:18,borderTop:"1px solid #e6ebf2",paddingTop:18}}>
+            {!uploadLink ? <>
+              <div className="muted" style={{marginBottom:10}}>
+                Complete the customer details above. The private upload link will be generated automatically.
+              </div>
+              {linkError && <div style={{color:"#b42318",fontWeight:800,marginBottom:10}}>{linkError}</div>}
+              {customerDetailsReady ? (
+                <div style={{marginTop:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontWeight:900,marginBottom:7}}>
+                    <span>Preparing secure upload link...</span>
+                    <span>{Math.max(1,linkProgress || 1)}%</span>
+                  </div>
+                  <div style={{height:12,borderRadius:999,background:"#e9eef6",overflow:"hidden"}}>
+                    <div style={{height:"100%",width:`${Math.max(1,linkProgress || 1)}%`,background:"#1264d8",transition:"width 30ms linear",borderRadius:999}} />
+                  </div>
+                  <div className="muted" style={{marginTop:8}}>This completes automatically in about 3 seconds.</div>
+                </div>
+              ) : (
+                <div className="muted" style={{marginTop:8}}>Waiting for all customer fields to be completed.</div>
+              )}
+            </> : <>
+              <label>Customer Upload Link</label>
+              <input value={uploadLink} readOnly onFocus={e=>e.currentTarget.select()}/>
+              <div className="muted" style={{marginTop:8}}>Valid for 24 hours. Generating a new link later will invalidate the previous active link.</div>
+              <div className="row" style={{justifyContent:"space-between",marginTop:14,flexWrap:"wrap"}}>
+                <div className="row">
+                  <button className="btn btn-soft" onClick={copyUploadLink}>Copy Link</button>
+                  <button className="btn btn-soft" onClick={createUploadLink} disabled={linkBusy}>{linkBusy ? "Generating..." : "Regenerate Link"}</button>
+                </div>
+                <button className="btn btn-primary" onClick={()=>setStep(2)}>Continue / Upload Here</button>
+              </div>
+            </>}
           </div>
         </>}
 
@@ -534,7 +659,7 @@ export default function Home(){
           <div className="kv"><span>Date / Time</span><b>{fmtTime(tx?.created_at)}</b></div>
           <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
             <button className="btn btn-soft" onClick={()=>window.print()}>{settings.labels.printReceipt}</button>
-            <button className="btn btn-primary" onClick={()=>{setStep(1);setTx(null);setIdFront("");setIdBack("");setSelfie("");setForm({name:"",ic:"",customerBankName:"",customerBankAccount:"",customerAddress:"",bank:"",account:"",amount:"",reference:""})}}>{settings.labels.returnHome}</button>
+            <button className="btn btn-primary" onClick={()=>{setStep(1);setTx(null);setIdFront("");setIdBack("");setSelfie("");setUploadLink("");setLinkError("");setForm({name:"",ic:"",customerBankName:"",customerBankAccount:"",customerAddress:"",bank:"",account:"",amount:"",reference:""})}}>{settings.labels.returnHome}</button>
           </div>
         </>}
       </div>
