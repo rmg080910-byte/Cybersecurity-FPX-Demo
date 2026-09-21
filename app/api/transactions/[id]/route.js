@@ -3,6 +3,13 @@ import { NextResponse } from "next/server";
 import { ensureSchema } from "../../../../lib/schema";
 import { query } from "../../../../lib/db";
 
+export async function GET(req, { params }) {
+  await ensureSchema();
+  const { id } = await params;
+  const r = await query(`SELECT * FROM transactions WHERE id=$1 LIMIT 1`, [id]);
+  return NextResponse.json(r.rows[0] || null);
+}
+
 export async function PUT(req, { params }) {
   await ensureSchema();
   const { id } = await params;
@@ -10,11 +17,11 @@ export async function PUT(req, { params }) {
   const r = await query(
     `UPDATE transactions
      SET status=COALESCE($1,status),
-         deadline=COALESCE($2,deadline),
+         deadline=$2,
          updated_at=NOW()
      WHERE id=$3
      RETURNING *`,
-    [b.status || null, b.deadline || null, id]
+    [b.status || null, b.deadline ?? null, id]
   );
   return NextResponse.json(r.rows[0] || null);
 }

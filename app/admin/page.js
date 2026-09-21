@@ -18,18 +18,21 @@ export default function Admin(){
   const [settings,setSettings]=useState(null);
   const [banks,setBanks]=useState([]);
   const [txs,setTxs]=useState([]);
+  const [salespersons,setSalespersons]=useState([]);
+  const [newStaff,setNewStaff]=useState({username:"",password:"",company_name:"",logo_data_url:"",enabled:true});
   const [search,setSearch]=useState("");
   const [tab,setTab]=useState("dashboard");
   const [selected,setSelected]=useState(null);
 
   async function loadAll(){
     await fetch("/api/init",{method:"POST"});
-    const [s,b,t]=await Promise.all([
+    const [s,b,t,sp]=await Promise.all([
       fetch("/api/settings").then(r=>r.json()),
       fetch("/api/banks").then(r=>r.json()),
-      fetch("/api/transactions").then(r=>r.json())
+      fetch("/api/transactions").then(r=>r.json()),
+      fetch("/api/salespersons").then(r=>r.json())
     ]);
-    setSettings(s);setBanks(b);setTxs(t);
+    setSettings(s);setBanks(b);setTxs(t);setSalespersons(sp);
   }
   useEffect(()=>{ if(authed) loadAll(); },[authed]);
 
@@ -48,6 +51,35 @@ export default function Admin(){
     await fetch("/api/banks",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(banks)});
     alert("Bank settings saved.");
   }
+
+  async function createSalesperson(){
+    const r=await fetch("/api/salespersons",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(newStaff)
+    });
+    const data=await r.json();
+    if(!r.ok){ alert(data.error || "Unable to create salesperson."); return; }
+    setSalespersons(x=>[data,...x]);
+    setNewStaff({username:"",password:"",company_name:"",logo_data_url:"",enabled:true});
+  }
+
+  async function saveSalesperson(sp){
+    const r=await fetch("/api/salespersons",{
+      method:"PUT",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(sp)
+    });
+    const data=await r.json();
+    if(!r.ok){ alert(data.error || "Unable to save salesperson."); return; }
+    setSalespersons(x=>x.map(v=>v.id===data.id?{...v,...data,password:""}:v));
+  }
+
+  async function deleteSalesperson(id){
+    if(!confirm("Delete this salesperson?")) return;
+    await fetch(`/api/salespersons?id=${id}`,{method:"DELETE"});
+    setSalespersons(x=>x.filter(v=>v.id!==id));
+  }
   async function updateTx(t,status){
     const hours=status==="FAILED"?settings.timers.failedHours:status==="ON_HOLD"?settings.timers.onHoldHours:0;
     const deadline=hours?new Date(Date.now()+hours*3600*1000).toISOString():null;
@@ -57,7 +89,7 @@ export default function Admin(){
 
   const filtered=useMemo(()=>txs.filter(t=>{
     const q=search.toLowerCase();
-    return !q || [t.transaction_id,t.name,t.ic,t.bank,t.account_number,t.status].some(v=>String(v||"").toLowerCase().includes(q));
+    return !q || [t.transaction_id,t.name,t.ic,t.bank,t.account_number,t.status,t.salesperson_username,t.salesperson_company].some(v=>String(v||"").toLowerCase().includes(q));
   }),[txs,search]);
 
   if(!authed) return <main className="page" style={{background:"#eef1eb"}}>
@@ -94,7 +126,7 @@ export default function Admin(){
       <div className="row" style={{justifyContent:"space-between",marginBottom:14}}>
         <div><h1 style={{margin:0}}>All-in-One Admin</h1><div className="muted">Controls the frontend demo</div></div>
         <div className="row">
-          {["dashboard","branding","text","banks","transactions"].map(x=><button key={x} className="btn btn-soft" onClick={()=>setTab(x)}>{x}</button>)}
+          {["dashboard","salespersons","branding","text","banks","transactions"].map(x=><button key={x} className="btn btn-soft" onClick={()=>setTab(x)}>{x}</button>)}
           <button className="btn btn-soft" onClick={()=>setAuthed(false)}>Logout</button>
         </div>
       </div>
@@ -114,6 +146,57 @@ export default function Admin(){
           <button className="btn btn-primary" style={{marginTop:14}} onClick={saveSettings}>Save</button>
         </div>
       </>}
+
+
+      {tab==="salespersons" && <div className="card">
+        <h2>Salespersons / Staff Login</h2>
+        <p className="muted">Each salesperson has a separate User ID, password, company name and logo. After login, the frontend header uses that salesperson's branding.</p>
+
+        <div className="card" style={{marginBottom:18,background:"#f8fafc"}}>
+          <h3 style={{marginTop:0}}>Add Salesperson</h3>
+          <div className="grid2">
+            <div><label>User ID</label><input value={newStaff.username} onChange={e=>setNewStaff({...newStaff,username:e.target.value})}/></div>
+            <div><label>Password</label><input type="password" value={newStaff.password} onChange={e=>setNewStaff({...newStaff,password:e.target.value})}/></div>
+            <div><label>Company Name</label><input value={newStaff.company_name} onChange={e=>setNewStaff({...newStaff,company_name:e.target.value})}/></div>
+            <div>
+              <label>Company Logo</label>
+              <FileToData label="Upload Logo" onData={d=>setNewStaff({...newStaff,logo_data_url:d})}/>
+              {newStaff.logo_data_url && <img src={newStaff.logo_data_url} alt="" style={{display:"block",maxHeight:70,maxWidth:200,marginTop:8}}/>}
+            </div>
+          </div>
+          <button className="btn btn-primary" style={{marginTop:14}} onClick={createSalesperson}>Add Salesperson</button>
+        </div>
+
+        {salespersons.length===0 && <div className="muted">No salesperson accounts yet.</div>}
+
+        {salespersons.map(sp=><div key={sp.id} className="card" style={{marginBottom:14}}>
+          <div className="row" style={{alignItems:"flex-start"}}>
+            <div style={{width:74,height:74,border:"1px solid #dfe6ef",borderRadius:14,display:"grid",placeItems:"center",overflow:"hidden",background:"#fff"}}>
+              {sp.logo_data_url ? <img src={sp.logo_data_url} alt="" style={{width:"100%",height:"100%",objectFit:"contain"}}/> : <b>{sp.company_name?.slice(0,1) || "S"}</b>}
+            </div>
+            <div style={{flex:1}}>
+              <div className="grid2">
+                <div><label>User ID</label><input value={sp.username} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,username:e.target.value}:v))}/></div>
+                <div><label>Company Name</label><input value={sp.company_name} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,company_name:e.target.value}:v))}/></div>
+                <div><label>New Password (leave blank to keep)</label><input type="password" value={sp.password || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,password:e.target.value}:v))}/></div>
+                <div>
+                  <label>Status</label>
+                  <select value={sp.enabled?"enabled":"disabled"} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,enabled:e.target.value==="enabled"}:v))}>
+                    <option value="enabled">Enabled</option>
+                    <option value="disabled">Disabled</option>
+                  </select>
+                </div>
+              </div>
+              <div className="row" style={{marginTop:12}}>
+                <FileToData label="Replace Logo" onData={d=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,logo_data_url:d}:v))}/>
+                <button className="btn btn-soft" onClick={()=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,logo_data_url:""}:v))}>Remove Logo</button>
+                <button className="btn btn-primary" onClick={()=>saveSalesperson(sp)}>Save</button>
+                <button className="btn btn-soft" onClick={()=>deleteSalesperson(sp.id)}>Delete</button>
+              </div>
+            </div>
+          </div>
+        </div>)}
+      </div>}
 
       {tab==="branding" && <div className="card">
         <h2>Branding / Appearance</h2>
@@ -180,9 +263,9 @@ export default function Admin(){
       {tab==="transactions" && <div className="card">
         <div className="row" style={{justifyContent:"space-between"}}><h2>Transactions</h2><input style={{maxWidth:320}} placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)}/></div>
         <div style={{overflowX:"auto"}}>
-          <table className="table"><thead><tr><th>ID</th><th>Name</th><th>Bank</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+          <table className="table"><thead><tr><th>ID</th><th>Staff</th><th>Company</th><th>Name</th><th>Bank</th><th>Amount</th><th>Status</th><th></th></tr></thead>
           <tbody>{filtered.map(t=><tr key={t.id}>
-            <td>{t.transaction_id}</td><td>{t.name}</td><td>{t.bank}</td><td>RM {Number(t.amount).toFixed(2)}</td><td>{t.status}</td>
+            <td>{t.transaction_id}</td><td>{t.salesperson_username||"-"}</td><td>{t.salesperson_company||"-"}</td><td>{t.name}</td><td>{t.bank}</td><td>RM {Number(t.amount).toFixed(2)}</td><td>{t.status}</td>
             <td><button className="btn btn-soft" onClick={()=>setSelected(t)}>Open</button></td>
           </tr>)}</tbody></table>
         </div>
@@ -191,7 +274,7 @@ export default function Admin(){
       {selected && <div className="modalBack" onClick={()=>setSelected(null)}>
         <div className="modal" onClick={e=>e.stopPropagation()}>
           <h2>{selected.transaction_id}</h2>
-          {["name","ic","bank","account_number","amount","reference","status","deadline","created_at"].map(k=><div className="kv" key={k}><span>{k}</span><b>{String(selected[k]??"")}</b></div>)}
+          {["salesperson_username","salesperson_company","name","ic","bank","account_number","amount","reference","status","deadline","created_at"].map(k=><div className="kv" key={k}><span>{k}</span><b>{String(selected[k]??"")}</b></div>)}
           <div className="row" style={{marginTop:16}}>
             <button className="btn" style={{background:settings.successColor,color:"#fff"}} onClick={()=>updateTx(selected,"SUCCESS")}>Successful</button>
             <button className="btn" style={{background:settings.failedColor,color:"#fff"}} onClick={()=>updateTx(selected,"FAILED")}>Failed</button>

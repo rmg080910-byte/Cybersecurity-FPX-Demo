@@ -19,10 +19,15 @@ export async function POST(req) {
   const id = txid();
   const r = await query(
     `INSERT INTO transactions
-      (transaction_id, biomatrix_id, name, ic, bank, account_number, amount, reference, status, deadline)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      (transaction_id, biomatrix_id, name, ic, bank, account_number, amount, reference, status, deadline,
+       salesperson_id, salesperson_username, salesperson_company)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      RETURNING *`,
-    [id,b.biomatrix_id,b.name,b.ic,b.bank,b.account_number,b.amount||0,b.reference||"",b.status||"ON_HOLD",b.deadline||null]
+    [
+      id,b.biomatrix_id,b.name,b.ic,b.bank,b.account_number,b.amount||0,b.reference||"",
+      b.status||"ON_HOLD",b.deadline||null,
+      b.salesperson_id||null,b.salesperson_username||null,b.salesperson_company||null
+    ]
   );
   return NextResponse.json(r.rows[0]);
 }

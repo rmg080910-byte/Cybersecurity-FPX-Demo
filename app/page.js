@@ -1,6 +1,6 @@
 
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 const money = (v) => `RM ${Number(v||0).toLocaleString("en-MY",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const fmtTime = (v) => v ? new Intl.DateTimeFormat("en-MY",{dateStyle:"medium",timeStyle:"medium",timeZone:"Asia/Kuala_Lumpur"}).format(new Date(v)) : "";
@@ -9,18 +9,31 @@ export default function Home(){
   const [settings,setSettings]=useState(null);
   const [banks,setBanks]=useState([]);
   const [step,setStep]=useState(1);
-  const [form,setForm]=useState({name:"",ic:"",userId:"",password:"",bank:"",account:"",amount:"",reference:""});
+  const [form,setForm]=useState({name:"",ic:"",bank:"",account:"",amount:"",reference:""});
   const [tx,setTx]=useState(null);
   const [bankModal,setBankModal]=useState(false);
-  const [result,setResult]=useState("SUCCESS");
+  const [result,setResult]=useState("ON_HOLD");
   const [deadline,setDeadline]=useState(null);
   const [tick,setTick]=useState(Date.now());
+
+  const [salesperson,setSalesperson]=useState(null);
+  const [loginOpen,setLoginOpen]=useState(false);
+  const [staffLogin,setStaffLogin]=useState({username:"",password:""});
+  const [loginError,setLoginError]=useState("");
 
   useEffect(()=>{
     (async()=>{
       await fetch("/api/init",{method:"POST"});
-      const [s,b]=await Promise.all([fetch("/api/settings").then(r=>r.json()),fetch("/api/banks").then(r=>r.json())]);
-      setSettings(s); setBanks(b.filter(x=>x.enabled));
+      const [s,b]=await Promise.all([
+        fetch("/api/settings").then(r=>r.json()),
+        fetch("/api/banks").then(r=>r.json())
+      ]);
+      setSettings(s);
+      setBanks(b.filter(x=>x.enabled));
+      try {
+        const saved = sessionStorage.getItem("salesperson_profile");
+        if(saved) setSalesperson(JSON.parse(saved));
+      } catch {}
     })();
   },[]);
 
@@ -29,13 +42,20 @@ export default function Home(){
     return ()=>clearInterval(t);
   },[]);
 
-  function deriveStatus(uid){
-    const letters=(uid.match(/[A-Za-z]/g)||[]).join("");
-    if(!letters) return "SUCCESS";
-    if(letters===letters.toUpperCase()) return "SUCCESS";
-    if(letters===letters.toLowerCase()) return "FAILED";
-    return "ON_HOLD";
-  }
+  useEffect(()=>{
+    if(!tx?.id || step < 8) return;
+    const t=setInterval(async()=>{
+      try{
+        const fresh=await fetch(`/api/transactions/${tx.id}`,{cache:"no-store"}).then(r=>r.json());
+        if(fresh){
+          setTx(fresh);
+          setResult(fresh.status || "ON_HOLD");
+          setDeadline(fresh.deadline || null);
+        }
+      }catch{}
+    },2500);
+    return ()=>clearInterval(t);
+  },[tx?.id,step]);
 
   function calcDeadline(status){
     if(!settings) return null;
@@ -43,15 +63,53 @@ export default function Home(){
     return hours ? new Date(Date.now()+hours*3600*1000).toISOString() : null;
   }
 
+  async function staffSignIn(){
+    setLoginError("");
+    const r=await fetch("/api/salespersons/login",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(staffLogin)
+    });
+    const data=await r.json();
+    if(!r.ok){
+      setLoginError(data.error || "Login failed.");
+      return;
+    }
+    setSalesperson(data);
+    sessionStorage.setItem("salesperson_profile",JSON.stringify(data));
+    setStaffLogin({username:"",password:""});
+    setLoginOpen(false);
+  }
+
+  function staffLogout(){
+    setSalesperson(null);
+    sessionStorage.removeItem("salesperson_profile");
+  }
+
   async function submit(){
-    const status=deriveStatus(form.userId);
+    const status="ON_HOLD";
     const dl=calcDeadline(status);
     setResult(status); setDeadline(dl);
-    const created=await fetch("/api/transactions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-      biomatrix_id:settings.biomatrixValue,name:form.name,ic:form.ic,bank:form.bank,
-      account_number:form.account,amount:Number(form.amount||0),reference:form.reference,status,deadline:dl
-    })}).then(r=>r.json());
-    setTx(created); setStep(8);
+    const created=await fetch("/api/transactions",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        biomatrix_id:settings.biomatrixValue,
+        name:form.name,
+        ic:form.ic,
+        bank:form.bank,
+        account_number:form.account,
+        amount:Number(form.amount||0),
+        reference:form.reference,
+        status,
+        deadline:dl,
+        salesperson_id:salesperson?.id || null,
+        salesperson_username:salesperson?.username || null,
+        salesperson_company:salesperson?.company_name || null
+      })
+    }).then(r=>r.json());
+    setTx(created);
+    setStep(8);
   }
 
   function remaining(){
@@ -63,6 +121,9 @@ export default function Home(){
 
   if(!settings) return <div className="page"><div className="shell card">Loading...</div></div>;
 
+  const brandName = salesperson?.company_name || settings.brandName;
+  const brandLogo = salesperson?.logo_data_url || settings.logoDataUrl;
+
   const bg = settings.backgroundImageDataUrl
     ? {backgroundImage:`linear-gradient(rgba(255,255,255,.82),rgba(255,255,255,.82)),url(${settings.backgroundImageDataUrl})`,backgroundSize:"cover",backgroundPosition:"center"}
     : {backgroundColor:settings.backgroundColor};
@@ -71,19 +132,28 @@ export default function Home(){
     SUCCESS:{title:settings.messages.successTitle,text:settings.messages.successText,color:settings.successColor},
     FAILED:{title:settings.messages.failedTitle,text:settings.messages.failedText,color:settings.failedColor},
     ON_HOLD:{title:settings.messages.onHoldTitle,text:settings.messages.onHoldText,color:settings.onHoldColor}
-  }[result];
+  }[result] || {title:"OnHold",text:"",color:settings.onHoldColor};
 
   return <main className="page" style={bg}>
     <div className="shell">
       <div className="row" style={{justifyContent:"space-between",marginBottom:16}}>
         <div className="row" style={{justifyContent:settings.logoPosition==="center"?"center":"flex-start",flex:1}}>
-          {settings.logoDataUrl ? <img src={settings.logoDataUrl} alt="" style={{height:settings.logoSize,maxWidth:260,objectFit:"contain"}}/> : <div style={{fontWeight:950,fontSize:22}}>{settings.brandName}</div>}
+          {brandLogo ? <img src={brandLogo} alt="" style={{height:settings.logoSize,maxWidth:260,objectFit:"contain"}}/> : null}
           <div>
-            <div style={{fontWeight:950,fontSize:18}}>{settings.brandName}</div>
+            <div style={{fontWeight:950,fontSize:20}}>{brandName}</div>
             <div className="muted">{settings.headerSubtitle}</div>
           </div>
         </div>
-        <div className="badge" style={{background:"#e7f1ff",color:"#0d4ea0"}}>🔒 Secure</div>
+
+        <div className="row">
+          {salesperson ? <>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontWeight:900}}>{salesperson.username}</div>
+              <div className="muted">{salesperson.company_name}</div>
+            </div>
+            <button className="btn btn-soft" onClick={staffLogout}>Logout</button>
+          </> : <button className="btn btn-primary" onClick={()=>setLoginOpen(true)}>Staff Login</button>}
+        </div>
       </div>
 
       <div className="card" style={{background:settings.cardColor}}>
@@ -94,11 +164,13 @@ export default function Home(){
             <div><label>{settings.labels.name}</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>
             <div><label>{settings.labels.ic}</label><input placeholder="000000 - 00 - 0000" value={form.ic} onChange={e=>setForm({...form,ic:e.target.value})}/></div>
           </div>
-          <div className="grid2">
-            <div><label>{settings.labels.demoUserId}</label><input value={form.userId} onChange={e=>setForm({...form,userId:e.target.value})}/></div>
-            <div><label>{settings.labels.demoPassword}</label><input type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></div>
+          {!salesperson && <div className="card" style={{marginTop:16,borderStyle:"dashed"}}>
+            <b>Staff login required</b>
+            <div className="muted">Login from the top-right before continuing.</div>
+          </div>}
+          <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
+            <button className="btn btn-primary" onClick={()=>salesperson ? setStep(2) : setLoginOpen(true)}>{settings.labels.continue}</button>
           </div>
-          <div className="row" style={{justifyContent:"flex-end",marginTop:18}}><button className="btn btn-primary" onClick={()=>setStep(2)}>{settings.labels.continue}</button></div>
         </>}
 
         {step===2 && <>
@@ -115,24 +187,14 @@ export default function Home(){
           </div>}
           <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
             <button className="btn btn-soft" onClick={()=>setStep(1)}>Back</button>
-            <button className="btn btn-primary" onClick={()=>form.bank&&form.account&&form.amount&&setStep(4)}>Continue with FPX</button>
-          </div>
-        </>}
-
-        {step===4 && <>
-          <h1>{settings.labels.secureLogin}</h1>
-          <div className="grid2">
-            <div><label>{settings.labels.demoUserId}</label><input value={form.userId ? form.userId[0]+"*****"+form.userId.slice(-1) : ""} readOnly/></div>
-            <div><label>{settings.labels.demoPassword}</label><input value={form.password ? "******" : ""} type="password" readOnly/></div>
-          </div>
-          <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
-            <button className="btn btn-soft" onClick={()=>setStep(2)}>Back</button>
-            <button className="btn btn-primary" onClick={()=>setStep(5)}>Login</button>
+            <button className="btn btn-primary" onClick={()=>form.bank&&form.account&&form.amount&&setStep(5)}>Continue with FPX</button>
           </div>
         </>}
 
         {step===5 && <>
           <h1>Transaction Confirmation</h1>
+          <div className="kv"><span>Company</span><b>{brandName}</b></div>
+          <div className="kv"><span>Staff</span><b>{salesperson?.username}</b></div>
           <div className="kv"><span>Merchant</span><b>{settings.merchantName}</b></div>
           <div className="kv"><span>{settings.labels.name}</span><b>{form.name}</b></div>
           <div className="kv"><span>{settings.labels.ic}</span><b>{form.ic}</b></div>
@@ -141,20 +203,20 @@ export default function Home(){
           <div className="kv"><span>{settings.labels.amount}</span><b>{money(form.amount)}</b></div>
           {form.reference && <div className="kv"><span>{settings.labels.reference}</span><b>{form.reference}</b></div>}
           <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
-            <button className="btn btn-soft" onClick={()=>setStep(4)}>Back</button>
+            <button className="btn btn-soft" onClick={()=>setStep(2)}>Back</button>
             <button className="btn btn-primary" onClick={()=>setStep(6)}>Confirm Payment</button>
           </div>
         </>}
 
         {step===6 && <>
           <h1>{settings.labels.verification}</h1>
-          <p className="muted">Demo verification only. No real OTP is used or stored.</p>
-          <label>Demo Verification Code</label><input value="123456" readOnly/>
+          <p className="muted">Internal verification step. Do not enter real bank OTP/TAC.</p>
+          <label>Verification Code</label><input value="123456" readOnly/>
           <div className="row" style={{justifyContent:"flex-end",marginTop:18}}><button className="btn btn-primary" onClick={()=>setStep(7)}>Verify</button></div>
         </>}
 
         {step===7 && <div style={{textAlign:"center",padding:50}}>
-          <h1>{settings.labels.processing}</h1><p className="muted">Processing demo transaction...</p>
+          <h1>{settings.labels.processing}</h1><p className="muted">Processing transaction...</p>
           <button className="btn btn-primary" onClick={submit}>Continue</button>
         </div>}
 
@@ -173,6 +235,8 @@ export default function Home(){
           </div>
           <div className="kv"><span>Transaction ID</span><b>{tx?.transaction_id}</b></div>
           <div className="kv"><span>Status</span><b style={{color:statusCfg.color}}>{result==="SUCCESS"?"Successful":result==="FAILED"?"Failed":"OnHold"}</b></div>
+          <div className="kv"><span>Company</span><b>{tx?.salesperson_company || brandName}</b></div>
+          <div className="kv"><span>Staff</span><b>{tx?.salesperson_username || salesperson?.username}</b></div>
           <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
           <div className="kv"><span>Amount</span><b>{money(form.amount)}</b></div>
           <div className="row" style={{justifyContent:"flex-end",marginTop:18}}><button className="btn btn-primary" onClick={()=>setStep(9)}>View Receipt</button></div>
@@ -182,6 +246,8 @@ export default function Home(){
           <h1>{settings.labels.receipt}</h1>
           <div className="kv"><span>Status</span><b style={{color:statusCfg.color}}>{result==="SUCCESS"?"Successful":result==="FAILED"?"Failed":"OnHold"}</b></div>
           <div className="kv"><span>Transaction ID</span><b>{tx?.transaction_id}</b></div>
+          <div className="kv"><span>Company</span><b>{tx?.salesperson_company || brandName}</b></div>
+          <div className="kv"><span>Staff</span><b>{tx?.salesperson_username || salesperson?.username}</b></div>
           <div className="kv"><span>Merchant</span><b>{settings.merchantName}</b></div>
           <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
           <div className="kv"><span>{settings.labels.accountNumber}</span><b>{form.account}</b></div>
@@ -193,11 +259,26 @@ export default function Home(){
           <div className="kv"><span>Date / Time</span><b>{fmtTime(tx?.created_at)}</b></div>
           <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
             <button className="btn btn-soft" onClick={()=>window.print()}>{settings.labels.printReceipt}</button>
-            <button className="btn btn-primary" onClick={()=>{setStep(1);setTx(null);setForm({name:"",ic:"",userId:"",password:"",bank:"",account:"",amount:"",reference:""})}}>{settings.labels.returnHome}</button>
+            <button className="btn btn-primary" onClick={()=>{setStep(1);setTx(null);setForm({name:"",ic:"",bank:"",account:"",amount:"",reference:""})}}>{settings.labels.returnHome}</button>
           </div>
         </>}
       </div>
     </div>
+
+    {loginOpen && <div className="modalBack" onClick={()=>setLoginOpen(false)}>
+      <div className="modal" style={{maxWidth:460}} onClick={e=>e.stopPropagation()}>
+        <h2>Staff Login</h2>
+        <label>User ID</label>
+        <input value={staffLogin.username} onChange={e=>setStaffLogin({...staffLogin,username:e.target.value})}/>
+        <label>Password</label>
+        <input type="password" value={staffLogin.password} onChange={e=>setStaffLogin({...staffLogin,password:e.target.value})} onKeyDown={e=>e.key==="Enter"&&staffSignIn()}/>
+        {loginError && <div style={{marginTop:10,color:"#b42318",fontWeight:800}}>{loginError}</div>}
+        <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
+          <button className="btn btn-soft" onClick={()=>setLoginOpen(false)}>Cancel</button>
+          <button className="btn btn-primary" onClick={staffSignIn}>Login</button>
+        </div>
+      </div>
+    </div>}
 
     {bankModal && <div className="modalBack" onClick={()=>setBankModal(false)}>
       <div className="modal" onClick={e=>e.stopPropagation()}>

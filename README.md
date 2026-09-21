@@ -79,3 +79,22 @@ In `/admin` → `banks`, every bank now has:
 - Reorder
 
 Uploaded bank logos are stored with the bank record in PostgreSQL and shown on the frontend bank selection screen.
+
+
+## Staff / salesperson multi-brand login
+
+Admin now has a `salespersons` tab.
+
+For each salesperson you can set:
+- User ID
+- Password
+- Company name
+- Company logo
+- Enabled / disabled
+
+Frontend behavior:
+- Staff Login is in the top-right.
+- Customer/payment page no longer contains staff User ID / Password fields.
+- After staff login, the header automatically switches to that salesperson's company name and logo.
+- Each transaction stores the salesperson username and company.
+- Transaction result page polls the backend, so an Admin status change can update an open frontend transaction.
