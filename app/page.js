@@ -124,6 +124,7 @@ export default function Home(){
   const brandName = salesperson?.company_name || settings.brandName;
   const brandLogo = salesperson?.logo_data_url || settings.logoDataUrl;
   const biomatrixValue = salesperson?.biomatrix_id || settings.biomatrixValue;
+  const staffLogoSize = Math.max(60, Math.min(260, Number(salesperson?.logo_size || settings.logoSize || 140)));
 
   const bg = settings.backgroundImageDataUrl
     ? {backgroundImage:`linear-gradient(rgba(255,255,255,.82),rgba(255,255,255,.82)),url(${settings.backgroundImageDataUrl})`,backgroundSize:"cover",backgroundPosition:"center"}
@@ -140,8 +141,8 @@ export default function Home(){
       <div className="row" style={{justifyContent:"space-between",marginBottom:16}}>
         <div className="row" style={{justifyContent:settings.logoPosition==="center"?"center":"flex-start",flex:1,minHeight:112}}>
           {brandLogo ? (
-            <div style={{width:360,height:104,display:"flex",alignItems:"center",justifyContent:settings.logoPosition==="center"?"center":"flex-start",overflow:"hidden"}}>
-              <img src={brandLogo} alt="" style={{maxHeight:100,maxWidth:350,width:"auto",height:"auto",objectFit:"contain",display:"block"}}/>
+            <div style={{width:Math.max(360,staffLogoSize*2.6),height:staffLogoSize+16,display:"flex",alignItems:"center",justifyContent:settings.logoPosition==="center"?"center":"flex-start",overflow:"hidden"}}>
+              <img src={brandLogo} alt="" style={{height:staffLogoSize,maxHeight:260,maxWidth:Math.max(350,staffLogoSize*2.5),width:"auto",objectFit:"contain",display:"block"}}/>
             </div>
           ) : (
             <div>
@@ -155,7 +156,7 @@ export default function Home(){
           {salesperson ? <>
             <div style={{textAlign:"right"}}>
               <div style={{fontWeight:900}}>{salesperson.username}</div>
-              <div className="muted">{salesperson.company_name}</div>
+              <div className="muted">{salesperson.biomatrix_id || biomatrixValue}</div>
             </div>
             <button className="btn btn-soft" onClick={staffLogout}>Logout</button>
           </> : <button className="btn btn-primary" onClick={()=>setLoginOpen(true)}>Staff Login</button>}
