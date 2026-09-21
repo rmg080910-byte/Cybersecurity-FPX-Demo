@@ -339,7 +339,14 @@ export default function Home(){
 
         {step===2 && <>
           <h1>Identity Verification</h1>
-          <p className="muted">Upload the front and back of the identification card, then upload a selfie.</p>
+          <div style={{marginBottom:18,borderRadius:18,overflow:"hidden",border:"1px solid #dfe6ef",background:"#fff"}}>
+            <img
+              src="/ekyc-guide.png"
+              alt="e-KYC Malaysia verification guide"
+              style={{width:"100%",display:"block",objectFit:"cover"}}
+            />
+          </div>
+          <p className="muted">Please review the guide above, then upload the front and back of the identification card and upload a selfie.</p>
 
           <div className="grid2">
             <div>

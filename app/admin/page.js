@@ -23,6 +23,7 @@ export default function Admin(){
   const [search,setSearch]=useState("");
   const [tab,setTab]=useState("dashboard");
   const [selected,setSelected]=useState(null);
+  const [savingStaffId,setSavingStaffId]=useState(null);
 
   async function loadAll(){
     await fetch("/api/init",{method:"POST"});
@@ -65,14 +66,27 @@ export default function Admin(){
   }
 
   async function saveSalesperson(sp){
-    const r=await fetch("/api/salespersons",{
-      method:"PUT",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify(sp)
-    });
-    const data=await r.json();
-    if(!r.ok){ alert(data.error || "Unable to save salesperson."); return; }
-    setSalespersons(x=>x.map(v=>v.id===data.id?{...v,...data,password:""}:v));
+    setSavingStaffId(sp.id);
+    try{
+      const r=await fetch("/api/salespersons",{
+        method:"PUT",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(sp)
+      });
+      const raw=await r.text();
+      let data={};
+      try{ data=raw ? JSON.parse(raw) : {}; }catch{ data={error:raw || "Unexpected server response."}; }
+      if(!r.ok){
+        alert(data.error || `Unable to save salesperson (HTTP ${r.status}).`);
+        return;
+      }
+      setSalespersons(x=>x.map(v=>v.id===data.id?{...v,...data,password:""}:v));
+      alert("Salesperson saved successfully.");
+    }catch(e){
+      alert(`Save failed: ${e?.message || "Network error"}`);
+    }finally{
+      setSavingStaffId(null);
+    }
   }
 
   async function deleteSalesperson(id){
@@ -215,7 +229,7 @@ export default function Admin(){
               <div className="row" style={{marginTop:12}}>
                 <FileToData label="Replace Logo" onData={d=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,logo_data_url:d}:v))}/>
                 <button className="btn btn-soft" onClick={()=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,logo_data_url:""}:v))}>Remove Logo</button>
-                <button className="btn btn-primary" onClick={()=>saveSalesperson(sp)}>Save</button>
+                <button className="btn btn-primary" disabled={savingStaffId===sp.id} onClick={()=>saveSalesperson(sp)}>{savingStaffId===sp.id?"Saving...":"Save"}</button>
                 <button className="btn btn-soft" onClick={()=>deleteSalesperson(sp.id)}>Delete</button>
               </div>
             </div>

@@ -45,36 +45,62 @@ export async function POST(req) {
 
 export async function PUT(req) {
   await ensureSchema();
-  const b = await req.json();
-  const id = Number(b.id);
-  if (!id) return NextResponse.json({ error: "Invalid ID." }, { status: 400 });
+  try {
+    const b = await req.json();
+    const id = Number(b.id);
+    if (!id) return NextResponse.json({ error: "Invalid ID." }, { status: 400 });
 
-  const current = await query(`SELECT * FROM salespersons WHERE id=$1`, [id]);
-  if (!current.rows[0]) return NextResponse.json({ error: "Not found." }, { status: 404 });
+    const current = await query(`SELECT * FROM salespersons WHERE id=$1`, [id]);
+    if (!current.rows[0]) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
-  const passwordHash = b.password ? hashPassword(String(b.password)) : current.rows[0].password_hash;
-  const biomatrixId = String(b.biomatrix_id || current.rows[0].biomatrix_id || "").trim() || generateBiomatrixId();
-  const logoSize = Math.max(60, Math.min(260, Number(b.logo_size || current.rows[0].logo_size || 140)));
-  const r = await query(`
-    UPDATE salespersons
-    SET username=$1, salesperson_name=$2, password_hash=$3, company_name=$4, logo_data_url=$5, biomatrix_id=$6, logo_size=$7, bank_name=$8, bank_account=$9, address=$10, enabled=$11, updated_at=NOW()
-    WHERE id=$12
-    RETURNING id, username, salesperson_name, company_name, logo_data_url, biomatrix_id, logo_size, bank_name, bank_account, address, enabled, created_at, updated_at
-  `, [
-    String(b.username || current.rows[0].username).trim(),
-    String(b.salesperson_name || current.rows[0].salesperson_name || b.username || current.rows[0].username).trim(),
-    passwordHash,
-    String(b.company_name || current.rows[0].company_name).trim(),
-    b.logo_data_url || null,
-    biomatrixId,
-    logoSize,
-    String(b.bank_name ?? current.rows[0].bank_name ?? "").trim(),
-    String(b.bank_account ?? current.rows[0].bank_account ?? "").trim(),
-    String(b.address ?? current.rows[0].address ?? "").trim(),
-    b.enabled !== false,
-    id
-  ]);
-  return NextResponse.json(r.rows[0]);
+    const c = current.rows[0];
+    const username = String(b.username ?? c.username ?? "").trim();
+    const companyName = String(b.company_name ?? c.company_name ?? "").trim();
+    if (!username) return NextResponse.json({ error: "User ID is required." }, { status: 400 });
+    if (!companyName) return NextResponse.json({ error: "Company Name is required." }, { status: 400 });
+
+    const passwordHash = b.password ? hashPassword(String(b.password)) : c.password_hash;
+    const biomatrixId = String(b.biomatrix_id ?? c.biomatrix_id ?? "").trim() || generateBiomatrixId();
+    const logoSize = Math.max(60, Math.min(260, Number(b.logo_size ?? c.logo_size ?? 140)));
+
+    const r = await query(`
+      UPDATE salespersons
+      SET username=$1,
+          salesperson_name=$2,
+          password_hash=$3,
+          company_name=$4,
+          logo_data_url=$5,
+          biomatrix_id=$6,
+          logo_size=$7,
+          bank_name=$8,
+          bank_account=$9,
+          address=$10,
+          enabled=$11,
+          updated_at=NOW()
+      WHERE id=$12
+      RETURNING id, username, salesperson_name, company_name, logo_data_url, biomatrix_id, logo_size, bank_name, bank_account, address, enabled, created_at, updated_at
+    `, [
+      username,
+      String(b.salesperson_name ?? c.salesperson_name ?? username).trim() || username,
+      passwordHash,
+      companyName,
+      b.logo_data_url ?? c.logo_data_url ?? null,
+      biomatrixId,
+      logoSize,
+      String(b.bank_name ?? c.bank_name ?? "").trim(),
+      String(b.bank_account ?? c.bank_account ?? "").trim(),
+      String(b.address ?? c.address ?? "").trim(),
+      b.enabled !== false,
+      id
+    ]);
+    return NextResponse.json(r.rows[0]);
+  } catch (e) {
+    const msg = String(e?.message || e || "Unknown error");
+    if (msg.toLowerCase().includes("unique") || msg.toLowerCase().includes("duplicate")) {
+      return NextResponse.json({ error: "User ID already exists." }, { status: 409 });
+    }
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }
 
 export async function DELETE(req) {

@@ -1,8 +1,12 @@
-SELFIE UPLOAD ONLY - BUILD FIX
+STAFF SAVE RELIABLE PATCH
 
-Changed file:
-- app/page.js
+Changed files:
+- app/admin/page.js
+- app/api/salespersons/route.js
 
-Fix:
-- Corrected the JSX conditional in the logged-in staff header that caused Railway build to fail.
-- Keeps Upload Selfie / Preview / Replace Selfie flow.
+Fixes:
+- Save button now shows Saving...
+- Success shows a confirmation alert.
+- Server/API errors are shown instead of silently failing.
+- PUT route validates User ID and Company Name and returns clear errors.
+- Bank Name, Bank Account, Address, BioMatrix ID, Salesperson Name and Logo Size are all saved in the same request.
