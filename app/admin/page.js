@@ -19,7 +19,7 @@ export default function Admin(){
   const [banks,setBanks]=useState([]);
   const [txs,setTxs]=useState([]);
   const [salespersons,setSalespersons]=useState([]);
-  const [newStaff,setNewStaff]=useState({username:"",salesperson_name:"",password:"",company_name:"",logo_data_url:"",biomatrix_id:"",logo_size:140,enabled:true});
+  const [newStaff,setNewStaff]=useState({username:"",salesperson_name:"",password:"",company_name:"",logo_data_url:"",biomatrix_id:"",logo_size:140,bank_name:"",bank_account:"",address:"",enabled:true});
   const [search,setSearch]=useState("");
   const [tab,setTab]=useState("dashboard");
   const [selected,setSelected]=useState(null);
@@ -61,7 +61,7 @@ export default function Admin(){
     const data=await r.json();
     if(!r.ok){ alert(data.error || "Unable to create salesperson."); return; }
     setSalespersons(x=>[data,...x]);
-    setNewStaff({username:"",salesperson_name:"",password:"",company_name:"",logo_data_url:"",biomatrix_id:"",logo_size:140,enabled:true});
+    setNewStaff({username:"",salesperson_name:"",password:"",company_name:"",logo_data_url:"",biomatrix_id:"",logo_size:140,bank_name:"",bank_account:"",address:"",enabled:true});
   }
 
   async function saveSalesperson(sp){
@@ -160,6 +160,9 @@ export default function Admin(){
             <div><label>Password</label><input type="password" value={newStaff.password} onChange={e=>setNewStaff({...newStaff,password:e.target.value})}/></div>
             <div><label>Company Name</label><input value={newStaff.company_name} onChange={e=>setNewStaff({...newStaff,company_name:e.target.value})}/></div>
             <div><label>BioMatrix ID (optional)</label><input placeholder="Leave blank = auto-generate" value={newStaff.biomatrix_id || ""} onChange={e=>setNewStaff({...newStaff,biomatrix_id:e.target.value})}/></div>
+            <div><label>Bank Name</label><input value={newStaff.bank_name || ""} onChange={e=>setNewStaff({...newStaff,bank_name:e.target.value})}/></div>
+            <div><label>Bank Account</label><input value={newStaff.bank_account || ""} onChange={e=>setNewStaff({...newStaff,bank_account:e.target.value})}/></div>
+            <div style={{gridColumn:"1 / -1"}}><label>Address</label><textarea rows={2} value={newStaff.address || ""} onChange={e=>setNewStaff({...newStaff,address:e.target.value})}/></div>
             <div>
               <label>Company Logo</label>
               <FileToData label="Upload Logo" onData={d=>setNewStaff({...newStaff,logo_data_url:d})}/>
@@ -193,6 +196,9 @@ export default function Admin(){
                 <div><label>Company Name</label><input value={sp.company_name} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,company_name:e.target.value}:v))}/></div>
                 <div><label>New Password (leave blank to keep)</label><input type="password" value={sp.password || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,password:e.target.value}:v))}/></div>
                 <div><label>BioMatrix ID</label><input value={sp.biomatrix_id || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,biomatrix_id:e.target.value}:v))}/></div>
+                <div><label>Bank Name</label><input value={sp.bank_name || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,bank_name:e.target.value}:v))}/></div>
+                <div><label>Bank Account</label><input value={sp.bank_account || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,bank_account:e.target.value}:v))}/></div>
+                <div style={{gridColumn:"1 / -1"}}><label>Address</label><textarea rows={2} value={sp.address || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,address:e.target.value}:v))}/></div>
                 <div>
                   <label>Logo Size: {sp.logo_size || 140}px</label>
                   <input type="range" min="60" max="260" step="5" value={sp.logo_size || 140} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,logo_size:Number(e.target.value)}:v))}/>

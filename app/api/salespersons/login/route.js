@@ -31,6 +31,9 @@ export async function POST(req) {
     company_name: u.company_name,
     logo_data_url: u.logo_data_url || "",
     logo_size: Number(u.logo_size || 140),
+    bank_name: u.bank_name || "",
+    bank_account: u.bank_account || "",
+    address: u.address || "",
     biomatrix_id
   });
 }

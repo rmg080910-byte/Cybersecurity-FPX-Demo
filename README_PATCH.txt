@@ -1,17 +1,27 @@
-STATUS + IC FORMAT PATCH ONLY
+STAFF PROFILE BANK/ADDRESS PATCH ONLY
 
-Changed file:
+Changed files:
+- lib/schema.js
+- app/api/salespersons/route.js
+- app/api/salespersons/login/route.js
+- app/admin/page.js
 - app/page.js
 
-Status rule uses the logged-in Staff User ID and ignores spaces, numbers and symbols:
-- all letters UPPERCASE => SUCCESS
-- all letters lowercase => FAILED
-- mixed uppercase/lowercase => ON_HOLD
+Per staff editable fields:
+- Salesperson Name
+- BioMatrix ID
+- Bank Name
+- Bank Account
+- Address
+- Logo Size / Preview
 
-The status is decided before the transaction is created; it is no longer forced to ON_HOLD.
+Frontend top-right shows in English:
+- Staff name
+- BioMatrix ID
+- Bank
+- Bank Account
+- Address
 
-IC format:
-- 12 digits maximum
-- displayed as 000000-00-0000
-- 14 characters total including the two hyphens
-- spaces are removed
+This page.js also consolidates recent fixes: Login label, IC 000000-00-0000 limit, username case status rule, random internal verification code.
+
+After deploy, Logout then Login again to load the new profile fields.

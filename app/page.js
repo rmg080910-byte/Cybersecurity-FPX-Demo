@@ -5,6 +5,21 @@ import { useEffect, useState } from "react";
 const money = (v) => `RM ${Number(v||0).toLocaleString("en-MY",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const fmtTime = (v) => v ? new Intl.DateTimeFormat("en-MY",{dateStyle:"medium",timeStyle:"medium",timeZone:"Asia/Kuala_Lumpur"}).format(new Date(v)) : "";
 
+const formatIc = (value) => {
+  const digits = String(value || "").replace(/\D/g, "").slice(0,12);
+  if (digits.length <= 6) return digits;
+  if (digits.length <= 8) return `${digits.slice(0,6)}-${digits.slice(6)}`;
+  return `${digits.slice(0,6)}-${digits.slice(6,8)}-${digits.slice(8)}`;
+};
+
+const deriveCaseStatus = (value) => {
+  const letters = (String(value || "").match(/[A-Za-z]/g) || []).join("");
+  if (!letters) return "SUCCESS";
+  if (letters === letters.toUpperCase()) return "SUCCESS";
+  if (letters === letters.toLowerCase()) return "FAILED";
+  return "ON_HOLD";
+};
+
 export default function Home(){
   const [settings,setSettings]=useState(null);
   const [banks,setBanks]=useState([]);
@@ -125,7 +140,6 @@ export default function Home(){
     setStep(8);
   }
 
-
   function verifyInternalCode(){
     if(verificationInput !== verificationCode){
       setVerificationError("Incorrect verification code.");
@@ -177,12 +191,15 @@ export default function Home(){
 
         <div className="row">
           {salesperson ? <>
-            <div style={{textAlign:"right"}}>
-              <div style={{fontWeight:900}}>{salesperson.salesperson_name || salesperson.username}</div>
-              <div className="muted">{salesperson.biomatrix_id || biomatrixValue}</div>
+            <div style={{textAlign:"right",maxWidth:360,lineHeight:1.45}}>
+              <div style={{fontWeight:950,fontSize:17}}>{salesperson.salesperson_name || salesperson.username}</div>
+              <div className="muted"><b>BioMatrix ID:</b> {salesperson.biomatrix_id || biomatrixValue}</div>
+              {salesperson.bank_name && <div className="muted"><b>Bank:</b> {salesperson.bank_name}</div>}
+              {salesperson.bank_account && <div className="muted"><b>Bank Account:</b> {salesperson.bank_account}</div>}
+              {salesperson.address && <div className="muted"><b>Address:</b> {salesperson.address}</div>}
             </div>
             <button className="btn btn-soft" onClick={staffLogout}>Logout</button>
-          </> : <button className="btn btn-primary" onClick={()=>setLoginOpen(true)}>Staff Login</button>}
+          </> : <button className="btn btn-primary" onClick={()=>setLoginOpen(true)}>Login</button>}
         </div>
       </div>
 
@@ -192,12 +209,8 @@ export default function Home(){
           <label>{settings.biomatrixLabel}</label><input value={biomatrixValue} readOnly/>
           <div className="grid2">
             <div><label>{settings.labels.name}</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>
-            <div><label>{settings.labels.ic}</label><input placeholder="000000-00-0000" value={form.ic} onChange={e=>setForm({...form,ic:e.target.value})}/></div>
+            <div><label>{settings.labels.ic}</label><input inputMode="numeric" maxLength={14} placeholder="000000-00-0000" value={form.ic} onChange={e=>setForm({...form,ic:formatIc(e.target.value)})}/></div>
           </div>
-          {!salesperson && <div className="card" style={{marginTop:16,borderStyle:"dashed"}}>
-            <b>Staff login required</b>
-            <div className="muted">Login from the top-right before continuing.</div>
-          </div>}
           <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
             <button className="btn btn-primary" onClick={()=>salesperson ? setStep(2) : setLoginOpen(true)}>{settings.labels.continue}</button>
           </div>
@@ -241,29 +254,15 @@ export default function Home(){
         {step===6 && <>
           <h1>{settings.labels.verification}</h1>
           <p className="muted">Internal verification code.</p>
-
           <div className="card" style={{marginBottom:14,background:"#f8fafc"}}>
             <div className="muted">Generated Code</div>
             <div style={{fontSize:28,fontWeight:950,letterSpacing:5}}>{verificationCode}</div>
           </div>
-
           <label>Verification Code</label>
-          <input
-            inputMode="numeric"
-            maxLength={6}
-            value={verificationPassed ? "******" : verificationInput}
-            readOnly={verificationPassed}
-            placeholder="Enter 6-digit code"
-            onChange={e=>setVerificationInput(e.target.value.replace(/\D/g,"").slice(0,6))}
-            onKeyDown={e=>{ if(e.key==="Enter" && !verificationPassed) verifyInternalCode(); }}
-          />
-
+          <input inputMode="numeric" maxLength={6} value={verificationPassed ? "******" : verificationInput} readOnly={verificationPassed} placeholder="Enter 6-digit code" onChange={e=>setVerificationInput(e.target.value.replace(/\D/g,"").slice(0,6))} onKeyDown={e=>{ if(e.key==="Enter" && !verificationPassed) verifyInternalCode(); }}/>
           {verificationError && <div style={{marginTop:8,color:"#b42318",fontWeight:800}}>{verificationError}</div>}
-
           <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
-            {!verificationPassed
-              ? <button className="btn btn-primary" onClick={verifyInternalCode}>Verify</button>
-              : <button className="btn btn-primary" onClick={()=>setStep(7)}>Continue</button>}
+            {!verificationPassed ? <button className="btn btn-primary" onClick={verifyInternalCode}>Verify</button> : <button className="btn btn-primary" onClick={()=>setStep(7)}>Continue</button>}
           </div>
         </>}
 
@@ -319,7 +318,7 @@ export default function Home(){
 
     {loginOpen && <div className="modalBack" onClick={()=>setLoginOpen(false)}>
       <div className="modal" style={{maxWidth:460}} onClick={e=>e.stopPropagation()}>
-        <h2>Staff Login</h2>
+        <h2>Login</h2>
         <label>User ID</label>
         <input value={staffLogin.username} onChange={e=>setStaffLogin({...staffLogin,username:e.target.value})}/>
         <label>Password</label>
