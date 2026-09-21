@@ -199,71 +199,72 @@ export default function Home(){
     form.customerAddress.trim()
   );
 
-  useEffect(()=>{
-    if(step !== 10 || !salesperson || uploadLink || !customerDetailsReady) return;
-    if(autoLinkStartedRef.current) return;
+  async function startUploadLinkFlow(){
+    if(!customerDetailsReady || linkBusy) return;
 
-    autoLinkStartedRef.current = true;
+    setStep(10);
+    setUploadLink("");
     setLinkError("");
     setLinkBusy(true);
     setLinkProgress(1);
 
-    let cancelled = false;
     const startedAt = Date.now();
+    let finished = false;
+
     const timer = setInterval(()=>{
       const elapsed = Date.now() - startedAt;
-      const pct = Math.min(100, Math.max(1, Math.floor((elapsed / 3000) * 100)));
-      if(!cancelled) setLinkProgress(pct);
+      const pct = Math.min(95, Math.max(1, Math.floor((elapsed / 2500) * 95)));
+      setLinkProgress(pct);
     }, 30);
 
-    (async()=>{
-      try{
-        const request = fetch("/api/upload-links",{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({
-            transaction_id:tx?.id || null,
-            biomatrix_id:biomatrixValue,
-            name:form.name,
-            ic:form.ic,
-            customer_bank_name:form.customerBankName,
-            customer_bank_account:form.customerBankAccount,
-            customer_address:form.customerAddress,
-            salesperson_id:salesperson?.id || null,
-            salesperson_username:salesperson?.username || null,
-            salesperson_company:salesperson?.company_name || null
-          })
-        }).then(async r=>{
-          const data=await r.json();
-          if(!r.ok) throw new Error(data.error || "Unable to generate upload link.");
-          return data;
-        });
+    try{
+      const request = fetch("/api/upload-links",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          transaction_id:tx?.id || null,
+          biomatrix_id:biomatrixValue,
+          name:form.name,
+          ic:form.ic,
+          customer_bank_name:form.customerBankName,
+          customer_bank_account:form.customerBankAccount,
+          customer_address:form.customerAddress,
+          salesperson_id:salesperson?.id || null,
+          salesperson_username:salesperson?.username || null,
+          salesperson_company:salesperson?.company_name || null
+        })
+      }).then(async r=>{
+        const contentType = r.headers.get("content-type") || "";
+        if(!contentType.includes("application/json")){
+          throw new Error(`Upload link API unavailable (HTTP ${r.status}).`);
+        }
+        const data = await r.json();
+        if(!r.ok) throw new Error(data.error || "Unable to generate upload link.");
+        return data;
+      });
 
-        const [data] = await Promise.all([
-          request,
-          new Promise(resolve=>setTimeout(resolve,3000))
-        ]);
+      const [data] = await Promise.all([
+        request,
+        new Promise(resolve=>setTimeout(resolve,2500))
+      ]);
 
-        if(cancelled) return;
-        clearInterval(timer);
-        setLinkProgress(100);
-        if(data.transaction) setTx(data.transaction);
-        setUploadLink(`${window.location.origin}${data.path}`);
-      }catch(e){
-        if(cancelled) return;
-        clearInterval(timer);
-        setLinkError(e.message || "Unable to generate upload link.");
-        autoLinkStartedRef.current=false;
-      }finally{
-        if(!cancelled) setLinkBusy(false);
-      }
-    })();
-
-    return ()=>{
-      cancelled = true;
       clearInterval(timer);
-    };
-  }, [step, salesperson, uploadLink, customerDetailsReady]);
+      finished = true;
+      setLinkProgress(100);
+
+      if(data.transaction) setTx(data.transaction);
+
+      setTimeout(()=>{
+        setUploadLink(`${window.location.origin}${data.path}`);
+        setLinkBusy(false);
+      }, 120);
+    }catch(e){
+      clearInterval(timer);
+      if(!finished) setLinkProgress(100);
+      setLinkError(e.message || "Unable to generate upload link.");
+      setLinkBusy(false);
+    }
+  }
 
   async function createUploadLink(isAuto=false){
     if(!customerDetailsReady){
@@ -290,6 +291,10 @@ export default function Home(){
           salesperson_company:salesperson?.company_name || null
         })
       });
+      const contentType = r.headers.get("content-type") || "";
+      if(!contentType.includes("application/json")){
+        throw new Error(`Upload link API unavailable (HTTP ${r.status}).`);
+      }
       const data=await r.json();
       if(!r.ok) throw new Error(data.error || "Unable to generate upload link.");
       if(data.transaction) setTx(data.transaction);
@@ -474,13 +479,7 @@ export default function Home(){
             <button
               className="btn btn-primary"
               disabled={!customerDetailsReady}
-              onClick={()=>{
-                if(!customerDetailsReady) return;
-                setLinkError("");
-                setLinkProgress(0);
-                autoLinkStartedRef.current=false;
-                setStep(10);
-              }}
+              onClick={startUploadLinkFlow}
             >
               Continue
             </button>
@@ -494,7 +493,7 @@ export default function Home(){
             {!uploadLink ? <>
               <div style={{marginTop:34}}>
                 <div style={{display:"flex",justifyContent:"space-between",fontWeight:900,marginBottom:10}}>
-                  <span>{"Loading" + ".".repeat((Math.floor((linkProgress || 1) / 12) % 3) + 1)}</span>
+                  <span>Loading...</span>
                   <span>{Math.max(1,linkProgress || 1)}%</span>
                 </div>
 
@@ -515,11 +514,7 @@ export default function Home(){
                   <div className="row" style={{justifyContent:"center",marginTop:12}}>
                     <button
                       className="btn btn-soft"
-                      onClick={()=>{
-                        autoLinkStartedRef.current=false;
-                        setLinkProgress(0);
-                        createUploadLink();
-                      }}
+                      onClick={startUploadLinkFlow}
                     >
                       Try Again
                     </button>
