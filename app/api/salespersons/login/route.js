@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { ensureSchema } from "../../../../lib/schema";
 import { query } from "../../../../lib/db";
 import { verifyPassword } from "../../../../lib/passwords";
+import { generateBiomatrixId } from "../../../../lib/biomatrix";
 
 export async function POST(req) {
   await ensureSchema();
@@ -17,10 +18,17 @@ export async function POST(req) {
     return NextResponse.json({ error: "Invalid username or password." }, { status: 401 });
   }
 
+  let biomatrix_id = u.biomatrix_id;
+  if (!biomatrix_id) {
+    biomatrix_id = generateBiomatrixId();
+    await query(`UPDATE salespersons SET biomatrix_id=$1, updated_at=NOW() WHERE id=$2`, [biomatrix_id, u.id]);
+  }
+
   return NextResponse.json({
     id: u.id,
     username: u.username,
     company_name: u.company_name,
-    logo_data_url: u.logo_data_url || ""
+    logo_data_url: u.logo_data_url || "",
+    biomatrix_id
   });
 }

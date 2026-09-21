@@ -1,15 +1,21 @@
-FIRST ROUND BANK LOGO PATCH
+STAFF BIOMATRIX PATCH ONLY
 
-Upload only these changed files to the same paths in GitHub:
-- lib/defaults.js
-- app/api/init/route.js
+Changed files:
+- lib/schema.js
+- lib/biomatrix.js
+- app/api/salespersons/login/route.js
+- app/api/salespersons/route.js
+- app/page.js
+- app/admin/page.js
 
-What it does:
-- Adds preset logos for common Malaysian banks.
-- Existing manually-uploaded logos are NOT overwritten.
-- You can later replace any logo from Admin > Banks > Upload Logo.
+What this patch does:
+- Every staff account gets its own BioMatrix ID.
+- If you leave BioMatrix blank when creating staff, the system auto-generates one.
+- The frontend shows the logged-in staff's BioMatrix ID instead of the global one.
+- Old staff accounts without a BioMatrix ID get one automatically at login.
 
-After GitHub commit and Railway deploy:
-1. Open the frontend once (this triggers /api/init).
-2. Refresh Admin > Banks.
-3. The first-round banks should already show logos.
+After upload:
+1. Upload these files to GitHub in the same paths.
+2. Commit.
+3. Wait for Railway deploy.
+4. Login as different staff to see different BioMatrix IDs.

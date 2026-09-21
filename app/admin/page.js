@@ -19,7 +19,7 @@ export default function Admin(){
   const [banks,setBanks]=useState([]);
   const [txs,setTxs]=useState([]);
   const [salespersons,setSalespersons]=useState([]);
-  const [newStaff,setNewStaff]=useState({username:"",password:"",company_name:"",logo_data_url:"",enabled:true});
+  const [newStaff,setNewStaff]=useState({username:"",password:"",company_name:"",logo_data_url:"",biomatrix_id:"",enabled:true});
   const [search,setSearch]=useState("");
   const [tab,setTab]=useState("dashboard");
   const [selected,setSelected]=useState(null);
@@ -61,7 +61,7 @@ export default function Admin(){
     const data=await r.json();
     if(!r.ok){ alert(data.error || "Unable to create salesperson."); return; }
     setSalespersons(x=>[data,...x]);
-    setNewStaff({username:"",password:"",company_name:"",logo_data_url:"",enabled:true});
+    setNewStaff({username:"",password:"",company_name:"",logo_data_url:"",biomatrix_id:"",enabled:true});
   }
 
   async function saveSalesperson(sp){
@@ -158,6 +158,7 @@ export default function Admin(){
             <div><label>User ID</label><input value={newStaff.username} onChange={e=>setNewStaff({...newStaff,username:e.target.value})}/></div>
             <div><label>Password</label><input type="password" value={newStaff.password} onChange={e=>setNewStaff({...newStaff,password:e.target.value})}/></div>
             <div><label>Company Name</label><input value={newStaff.company_name} onChange={e=>setNewStaff({...newStaff,company_name:e.target.value})}/></div>
+            <div><label>BioMatrix ID (optional)</label><input placeholder="Leave blank = auto-generate" value={newStaff.biomatrix_id || ""} onChange={e=>setNewStaff({...newStaff,biomatrix_id:e.target.value})}/></div>
             <div>
               <label>Company Logo</label>
               <FileToData label="Upload Logo" onData={d=>setNewStaff({...newStaff,logo_data_url:d})}/>
@@ -179,6 +180,7 @@ export default function Admin(){
                 <div><label>User ID</label><input value={sp.username} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,username:e.target.value}:v))}/></div>
                 <div><label>Company Name</label><input value={sp.company_name} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,company_name:e.target.value}:v))}/></div>
                 <div><label>New Password (leave blank to keep)</label><input type="password" value={sp.password || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,password:e.target.value}:v))}/></div>
+                <div><label>BioMatrix ID</label><input value={sp.biomatrix_id || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,biomatrix_id:e.target.value}:v))}/></div>
                 <div>
                   <label>Status</label>
                   <select value={sp.enabled?"enabled":"disabled"} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,enabled:e.target.value==="enabled"}:v))}>

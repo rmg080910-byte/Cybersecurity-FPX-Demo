@@ -94,7 +94,7 @@ export default function Home(){
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
-        biomatrix_id:settings.biomatrixValue,
+        biomatrix_id:(salesperson?.biomatrix_id || settings.biomatrixValue),
         name:form.name,
         ic:form.ic,
         bank:form.bank,
@@ -123,6 +123,7 @@ export default function Home(){
 
   const brandName = salesperson?.company_name || settings.brandName;
   const brandLogo = salesperson?.logo_data_url || settings.logoDataUrl;
+  const biomatrixValue = salesperson?.biomatrix_id || settings.biomatrixValue;
 
   const bg = settings.backgroundImageDataUrl
     ? {backgroundImage:`linear-gradient(rgba(255,255,255,.82),rgba(255,255,255,.82)),url(${settings.backgroundImageDataUrl})`,backgroundSize:"cover",backgroundPosition:"center"}
@@ -159,7 +160,7 @@ export default function Home(){
       <div className="card" style={{background:settings.cardColor}}>
         {step===1 && <>
           <h1>{settings.labels.paymentTitle}</h1><p className="muted">{settings.labels.paymentSubtitle}</p>
-          <label>{settings.biomatrixLabel}</label><input value={settings.biomatrixValue} readOnly/>
+          <label>{settings.biomatrixLabel}</label><input value={biomatrixValue} readOnly/>
           <div className="grid2">
             <div><label>{settings.labels.name}</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>
             <div><label>{settings.labels.ic}</label><input placeholder="000000 - 00 - 0000" value={form.ic} onChange={e=>setForm({...form,ic:e.target.value})}/></div>
@@ -251,7 +252,7 @@ export default function Home(){
           <div className="kv"><span>Merchant</span><b>{settings.merchantName}</b></div>
           <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
           <div className="kv"><span>{settings.labels.accountNumber}</span><b>{form.account}</b></div>
-          <div className="kv"><span>{settings.biomatrixLabel}</span><b>{settings.biomatrixValue}</b></div>
+          <div className="kv"><span>{settings.biomatrixLabel}</span><b>{tx?.biomatrix_id || biomatrixValue}</b></div>
           {form.reference && <div className="kv"><span>{settings.labels.reference}</span><b>{form.reference}</b></div>}
           <div className="kv"><span>{settings.labels.name}</span><b>{form.name}</b></div>
           <div className="kv"><span>{settings.labels.ic}</span><b>{form.ic}</b></div>
