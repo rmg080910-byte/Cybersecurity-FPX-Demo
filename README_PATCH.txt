@@ -1,17 +1,18 @@
-KYC IMAGE BACKEND SAVE PATCH
+LOGIN FIRST PAGE PATCH ONLY
 
-Changed files:
+Changed file:
 - app/page.js
-- app/admin/page.js
-- app/api/transactions/route.js
-- lib/schema.js
 
-What it does:
-- ID Front, ID Back and Selfie are compressed in the browser.
-- They are saved with the transaction in PostgreSQL.
-- Admin > Transactions > Open shows all 3 images.
-- Clicking an image opens the saved image.
-- Existing transactions continue to work and simply show "Not uploaded" for old records.
+New flow:
+1. Login page
+2. e-KYC / Open File page
+3. Identity Verification
+4. Select Bank
+5. Confirmation
+6. Verification
+7. Result / Receipt
 
-Privacy:
-Use synthetic/test identity images for tutorial/demo testing. Real identity documents and selfies are sensitive personal data and should only be collected with appropriate consent, access controls, retention/deletion rules and legal compliance.
+Behavior:
+- The e-KYC page is not shown until staff login succeeds.
+- Logout returns directly to the Login page.
+- Existing saved staff session still skips Login until Logout.

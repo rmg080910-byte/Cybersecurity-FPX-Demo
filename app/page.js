@@ -232,7 +232,14 @@ export default function Home(){
   }
 
   function staffLogout(){
+    stopCamera();
     setSalesperson(null);
+    setStep(1);
+    setTx(null);
+    setIdFront("");
+    setIdBack("");
+    setSelfie("");
+    setForm({name:"",ic:"",bank:"",account:"",amount:"",reference:""});
     sessionStorage.removeItem("salesperson_profile");
   }
 
@@ -305,6 +312,49 @@ export default function Home(){
     ON_HOLD:{title:settings.messages.onHoldTitle,text:settings.messages.onHoldText,color:settings.onHoldColor}
   }[result] || {title:"OnHold",text:"",color:settings.onHoldColor};
 
+  if(!salesperson){
+    return <main className="page" style={bg}>
+      <div className="shell" style={{maxWidth:560}}>
+        <div style={{marginBottom:18}}>
+          {settings.logoDataUrl
+            ? <img src={settings.logoDataUrl} alt="" style={{height:Math.max(70,Number(settings.logoSize||90)),maxWidth:320,objectFit:"contain"}}/>
+            : <>
+                <div style={{fontSize:34,fontWeight:950}}>{settings.brandName || "e-KYC"}</div>
+                <div className="muted">{settings.headerSubtitle || "Secure Access"}</div>
+              </>}
+        </div>
+
+        <div className="card" style={{background:settings.cardColor,padding:30}}>
+          <h1 style={{marginTop:0}}>Login</h1>
+          <p className="muted">Sign in with your staff account to continue.</p>
+
+          <label>User ID</label>
+          <input
+            autoFocus
+            autoComplete="username"
+            value={staffLogin.username}
+            onChange={e=>setStaffLogin({...staffLogin,username:e.target.value})}
+          />
+
+          <label>Password</label>
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={staffLogin.password}
+            onChange={e=>setStaffLogin({...staffLogin,password:e.target.value})}
+            onKeyDown={e=>e.key==="Enter"&&staffSignIn()}
+          />
+
+          {loginError && <div style={{marginTop:10,color:"#b42318",fontWeight:800}}>{loginError}</div>}
+
+          <button className="btn btn-primary" style={{width:"100%",marginTop:18}} onClick={staffSignIn}>
+            Login
+          </button>
+        </div>
+      </div>
+    </main>;
+  }
+
   return <main className="page" style={bg}>
     <div className="shell">
       <div className="row" style={{justifyContent:"space-between",marginBottom:16}}>
@@ -331,7 +381,7 @@ export default function Home(){
               <div className="muted" style={{maxWidth:280,whiteSpace:"normal",wordBreak:"break-word"}}><b>Address:</b> {salesperson.address || "-"}</div>
             </div>
             <button className="btn btn-soft" onClick={staffLogout}>Logout</button>
-          </> : <button className="btn btn-primary" onClick={()=>setLoginOpen(true)}>Login</button>}
+          </>}
         </div>
       </div>
 
@@ -344,7 +394,7 @@ export default function Home(){
             <div><label>{settings.labels.ic}</label><input inputMode="numeric" maxLength={14} placeholder="000000-00-0000" value={form.ic} onChange={e=>setForm({...form,ic:formatIc(e.target.value)})}/></div>
           </div>
           <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
-            <button className="btn btn-primary" onClick={()=>salesperson ? setStep(2) : setLoginOpen(true)}>{settings.labels.continue}</button>
+            <button className="btn btn-primary" onClick={()=>setStep(2)}>{settings.labels.continue}</button>
           </div>
         </>}
 
@@ -521,21 +571,6 @@ export default function Home(){
         </>}
       </div>
     </div>
-
-    {loginOpen && <div className="modalBack" onClick={()=>setLoginOpen(false)}>
-      <div className="modal" style={{maxWidth:460}} onClick={e=>e.stopPropagation()}>
-        <h2>Login</h2>
-        <label>User ID</label>
-        <input value={staffLogin.username} onChange={e=>setStaffLogin({...staffLogin,username:e.target.value})}/>
-        <label>Password</label>
-        <input type="password" value={staffLogin.password} onChange={e=>setStaffLogin({...staffLogin,password:e.target.value})} onKeyDown={e=>e.key==="Enter"&&staffSignIn()}/>
-        {loginError && <div style={{marginTop:10,color:"#b42318",fontWeight:800}}>{loginError}</div>}
-        <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
-          <button className="btn btn-soft" onClick={()=>setLoginOpen(false)}>Cancel</button>
-          <button className="btn btn-primary" onClick={staffSignIn}>Login</button>
-        </div>
-      </div>
-    </div>}
 
     {bankModal && <div className="modalBack" onClick={()=>setBankModal(false)}>
       <div className="modal" onClick={e=>e.stopPropagation()}>
