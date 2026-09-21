@@ -138,12 +138,17 @@ export default function Home(){
   return <main className="page" style={bg}>
     <div className="shell">
       <div className="row" style={{justifyContent:"space-between",marginBottom:16}}>
-        <div className="row" style={{justifyContent:settings.logoPosition==="center"?"center":"flex-start",flex:1}}>
-          {brandLogo ? <img src={brandLogo} alt="" style={{height:settings.logoSize,maxWidth:260,objectFit:"contain"}}/> : null}
-          <div>
-            <div style={{fontWeight:950,fontSize:20}}>{brandName}</div>
-            <div className="muted">{settings.headerSubtitle}</div>
-          </div>
+        <div className="row" style={{justifyContent:settings.logoPosition==="center"?"center":"flex-start",flex:1,minHeight:112}}>
+          {brandLogo ? (
+            <div style={{width:360,height:104,display:"flex",alignItems:"center",justifyContent:settings.logoPosition==="center"?"center":"flex-start",overflow:"hidden"}}>
+              <img src={brandLogo} alt="" style={{maxHeight:100,maxWidth:350,width:"auto",height:"auto",objectFit:"contain",display:"block"}}/>
+            </div>
+          ) : (
+            <div>
+              <div style={{fontWeight:950,fontSize:30}}>{brandName}</div>
+              <div className="muted" style={{fontSize:16}}>{settings.headerSubtitle}</div>
+            </div>
+          )}
         </div>
 
         <div className="row">
