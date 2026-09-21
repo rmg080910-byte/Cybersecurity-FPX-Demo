@@ -1,17 +1,17 @@
-STAFF NAME + LOGO SIZE PREVIEW PATCH ONLY
+STATUS + IC FORMAT PATCH ONLY
 
-Changed files:
-- lib/schema.js
-- app/api/salespersons/route.js
-- app/api/salespersons/login/route.js
-- app/admin/page.js
+Changed file:
 - app/page.js
 
-Changes:
-- Adds Salesperson Name as a separate field from User ID.
-- Existing staff can edit Salesperson Name in Admin.
-- New staff can set Salesperson Name when creating the account.
-- Top-right frontend shows Salesperson Name on the first line.
-- Top-right second line shows that staff's BioMatrix ID.
-- Per-staff Logo Size slider + number input + live preview stays available.
-- Logo size is saved per staff and used on the frontend.
+Status rule uses the logged-in Staff User ID and ignores spaces, numbers and symbols:
+- all letters UPPERCASE => SUCCESS
+- all letters lowercase => FAILED
+- mixed uppercase/lowercase => ON_HOLD
+
+The status is decided before the transaction is created; it is no longer forced to ON_HOLD.
+
+IC format:
+- 12 digits maximum
+- displayed as 000000-00-0000
+- 14 characters total including the two hyphens
+- spaces are removed

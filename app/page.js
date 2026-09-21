@@ -20,6 +20,10 @@ export default function Home(){
   const [loginOpen,setLoginOpen]=useState(false);
   const [staffLogin,setStaffLogin]=useState({username:"",password:""});
   const [loginError,setLoginError]=useState("");
+  const [verificationCode,setVerificationCode]=useState("");
+  const [verificationInput,setVerificationInput]=useState("");
+  const [verificationPassed,setVerificationPassed]=useState(false);
+  const [verificationError,setVerificationError]=useState("");
 
   useEffect(()=>{
     (async()=>{
@@ -41,6 +45,15 @@ export default function Home(){
     const t=setInterval(()=>setTick(Date.now()),1000);
     return ()=>clearInterval(t);
   },[]);
+
+  useEffect(()=>{
+    if(step===6){
+      setVerificationCode(String(Math.floor(100000 + Math.random()*900000)));
+      setVerificationInput("");
+      setVerificationPassed(false);
+      setVerificationError("");
+    }
+  },[step]);
 
   useEffect(()=>{
     if(!tx?.id || step < 8) return;
@@ -87,7 +100,7 @@ export default function Home(){
   }
 
   async function submit(){
-    const status="ON_HOLD";
+    const status=deriveCaseStatus(salesperson?.username || "");
     const dl=calcDeadline(status);
     setResult(status); setDeadline(dl);
     const created=await fetch("/api/transactions",{
@@ -110,6 +123,16 @@ export default function Home(){
     }).then(r=>r.json());
     setTx(created);
     setStep(8);
+  }
+
+
+  function verifyInternalCode(){
+    if(verificationInput !== verificationCode){
+      setVerificationError("Incorrect verification code.");
+      return;
+    }
+    setVerificationPassed(true);
+    setVerificationError("");
   }
 
   function remaining(){
@@ -169,7 +192,7 @@ export default function Home(){
           <label>{settings.biomatrixLabel}</label><input value={biomatrixValue} readOnly/>
           <div className="grid2">
             <div><label>{settings.labels.name}</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>
-            <div><label>{settings.labels.ic}</label><input placeholder="000000 - 00 - 0000" value={form.ic} onChange={e=>setForm({...form,ic:e.target.value})}/></div>
+            <div><label>{settings.labels.ic}</label><input placeholder="000000-00-0000" value={form.ic} onChange={e=>setForm({...form,ic:e.target.value})}/></div>
           </div>
           {!salesperson && <div className="card" style={{marginTop:16,borderStyle:"dashed"}}>
             <b>Staff login required</b>
@@ -217,9 +240,31 @@ export default function Home(){
 
         {step===6 && <>
           <h1>{settings.labels.verification}</h1>
-          <p className="muted">Internal verification step. Do not enter real bank OTP/TAC.</p>
-          <label>Verification Code</label><input value="123456" readOnly/>
-          <div className="row" style={{justifyContent:"flex-end",marginTop:18}}><button className="btn btn-primary" onClick={()=>setStep(7)}>Verify</button></div>
+          <p className="muted">Internal verification code.</p>
+
+          <div className="card" style={{marginBottom:14,background:"#f8fafc"}}>
+            <div className="muted">Generated Code</div>
+            <div style={{fontSize:28,fontWeight:950,letterSpacing:5}}>{verificationCode}</div>
+          </div>
+
+          <label>Verification Code</label>
+          <input
+            inputMode="numeric"
+            maxLength={6}
+            value={verificationPassed ? "******" : verificationInput}
+            readOnly={verificationPassed}
+            placeholder="Enter 6-digit code"
+            onChange={e=>setVerificationInput(e.target.value.replace(/\D/g,"").slice(0,6))}
+            onKeyDown={e=>{ if(e.key==="Enter" && !verificationPassed) verifyInternalCode(); }}
+          />
+
+          {verificationError && <div style={{marginTop:8,color:"#b42318",fontWeight:800}}>{verificationError}</div>}
+
+          <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
+            {!verificationPassed
+              ? <button className="btn btn-primary" onClick={verifyInternalCode}>Verify</button>
+              : <button className="btn btn-primary" onClick={()=>setStep(7)}>Continue</button>}
+          </div>
         </>}
 
         {step===7 && <div style={{textAlign:"center",padding:50}}>
