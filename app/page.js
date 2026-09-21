@@ -200,7 +200,7 @@ export default function Home(){
   );
 
   useEffect(()=>{
-    if(step !== 1 || !salesperson || uploadLink || linkBusy || !customerDetailsReady) return;
+    if(step !== 10 || !salesperson || uploadLink || linkBusy || !customerDetailsReady) return;
     if(autoLinkStartedRef.current) return;
 
     autoLinkStartedRef.current = true;
@@ -435,36 +435,94 @@ export default function Home(){
               <textarea rows={3} value={form.customerAddress} onChange={e=>setForm({...form,customerAddress:e.target.value})}/>
             </div>
           </div>
-          <div style={{marginTop:18,borderTop:"1px solid #e6ebf2",paddingTop:18}}>
+          <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
+            <button
+              className="btn btn-primary"
+              disabled={!customerDetailsReady}
+              onClick={()=>{
+                if(!customerDetailsReady) return;
+                setLinkError("");
+                setLinkProgress(0);
+                autoLinkStartedRef.current=false;
+                setStep(10);
+              }}
+            >
+              Continue
+            </button>
+          </div>
+        </>}
+
+        {step===10 && <>
+          <div style={{maxWidth:760,margin:"0 auto",padding:"28px 0"}}>
+            <h1 style={{textAlign:"center"}}>Generate Customer Upload Link</h1>
+
             {!uploadLink ? <>
-              <div className="muted" style={{marginBottom:10}}>
-                Complete the customer details above. The private upload link will be generated automatically.
+              <div style={{marginTop:34}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontWeight:900,marginBottom:10}}>
+                  <span>{"Generating secure upload link" + ".".repeat((Math.floor((linkProgress || 1) / 12) % 3) + 1)}</span>
+                  <span>{Math.max(1,linkProgress || 1)}%</span>
+                </div>
+
+                <div style={{height:14,borderRadius:999,background:"#e9eef6",overflow:"hidden"}}>
+                  <div
+                    style={{
+                      height:"100%",
+                      width:`${Math.max(1,linkProgress || 1)}%`,
+                      background:"#1264d8",
+                      transition:"width 30ms linear",
+                      borderRadius:999
+                    }}
+                  />
+                </div>
+
+                <div className="muted" style={{textAlign:"center",marginTop:12}}>
+                  Please wait. The link will be ready automatically in about 3 seconds.
+                </div>
+
+                {linkError && <>
+                  <div style={{color:"#b42318",fontWeight:800,textAlign:"center",marginTop:16}}>{linkError}</div>
+                  <div className="row" style={{justifyContent:"center",marginTop:12}}>
+                    <button
+                      className="btn btn-soft"
+                      onClick={()=>{
+                        autoLinkStartedRef.current=false;
+                        setLinkProgress(0);
+                        createUploadLink();
+                      }}
+                    >
+                      Try Again
+                    </button>
+                  </div>
+                </>}
               </div>
-              {linkError && <div style={{color:"#b42318",fontWeight:800,marginBottom:10}}>{linkError}</div>}
-              {customerDetailsReady ? (
-                <div style={{marginTop:12}}>
-                  <div style={{display:"flex",justifyContent:"space-between",fontWeight:900,marginBottom:7}}>
-                    <span>Preparing secure upload link...</span>
-                    <span>{Math.max(1,linkProgress || 1)}%</span>
-                  </div>
-                  <div style={{height:12,borderRadius:999,background:"#e9eef6",overflow:"hidden"}}>
-                    <div style={{height:"100%",width:`${Math.max(1,linkProgress || 1)}%`,background:"#1264d8",transition:"width 30ms linear",borderRadius:999}} />
-                  </div>
-                  <div className="muted" style={{marginTop:8}}>This completes automatically in about 3 seconds.</div>
-                </div>
-              ) : (
-                <div className="muted" style={{marginTop:8}}>Waiting for all customer fields to be completed.</div>
-              )}
             </> : <>
-              <label>Customer Upload Link</label>
-              <input value={uploadLink} readOnly onFocus={e=>e.currentTarget.select()}/>
-              <div className="muted" style={{marginTop:8}}>Valid for 24 hours. Generating a new link later will invalidate the previous active link.</div>
-              <div className="row" style={{justifyContent:"space-between",marginTop:14,flexWrap:"wrap"}}>
-                <div className="row">
-                  <button className="btn btn-soft" onClick={copyUploadLink}>Copy Link</button>
-                  <button className="btn btn-soft" onClick={createUploadLink} disabled={linkBusy}>{linkBusy ? "Generating..." : "Regenerate Link"}</button>
+              <div style={{marginTop:28}}>
+                <div style={{fontWeight:950,fontSize:18,marginBottom:10}}>Customer Upload Link</div>
+                <input value={uploadLink} readOnly onFocus={e=>e.currentTarget.select()}/>
+                <div className="muted" style={{marginTop:8}}>
+                  Valid for 24 hours. Regenerating creates a new link and invalidates the previous active link.
                 </div>
-                <button className="btn btn-primary" onClick={()=>setStep(2)}>Continue / Upload Here</button>
+
+                <div className="row" style={{justifyContent:"space-between",marginTop:18,flexWrap:"wrap",gap:10}}>
+                  <button className="btn btn-soft" onClick={()=>setStep(1)}>Back</button>
+
+                  <div className="row" style={{flexWrap:"wrap"}}>
+                    <button className="btn btn-primary" onClick={copyUploadLink}>Copy Link</button>
+                    <button
+                      className="btn btn-soft"
+                      onClick={async ()=>{
+                        setUploadLink("");
+                        setLinkProgress(0);
+                        autoLinkStartedRef.current=false;
+                        setTimeout(()=>autoLinkStartedRef.current=false,0);
+                      }}
+                      disabled={linkBusy}
+                    >
+                      Regenerate Link
+                    </button>
+                    <button className="btn btn-soft" onClick={()=>setStep(2)}>Upload Here</button>
+                  </div>
+                </div>
               </div>
             </>}
           </div>
