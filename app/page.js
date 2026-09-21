@@ -1,6 +1,6 @@
 
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 const money = (v) => `RM ${Number(v||0).toLocaleString("en-MY",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const fmtTime = (v) => v ? new Intl.DateTimeFormat("en-MY",{dateStyle:"medium",timeStyle:"medium",timeZone:"Asia/Kuala_Lumpur"}).format(new Date(v)) : "";
@@ -62,10 +62,6 @@ export default function Home(){
   const [idFront,setIdFront]=useState("");
   const [idBack,setIdBack]=useState("");
   const [selfie,setSelfie]=useState("");
-  const [cameraOpen,setCameraOpen]=useState(false);
-  const [cameraError,setCameraError]=useState("");
-  const videoRef=useRef(null);
-  const streamRef=useRef(null);
 
   useEffect(()=>{
     (async()=>{
@@ -97,14 +93,6 @@ export default function Home(){
     }
   },[step]);
 
-  useEffect(()=>{
-    return ()=>{
-      if(streamRef.current){
-        streamRef.current.getTracks().forEach(t=>t.stop());
-        streamRef.current=null;
-      }
-    };
-  },[]);
 
   useEffect(()=>{
     if(!tx?.id || step < 8) return;
@@ -157,55 +145,6 @@ export default function Home(){
     reader.readAsDataURL(file);
   }
 
-  async function startCamera(){
-    setCameraError("");
-    try{
-      if(streamRef.current){
-        streamRef.current.getTracks().forEach(t=>t.stop());
-      }
-      const stream=await navigator.mediaDevices.getUserMedia({
-        video:{facingMode:"user"},
-        audio:false
-      });
-      streamRef.current=stream;
-      setCameraOpen(true);
-      setTimeout(()=>{
-        if(videoRef.current){
-          videoRef.current.srcObject=stream;
-          videoRef.current.play().catch(()=>{});
-        }
-      },50);
-    }catch(e){
-      setCameraOpen(false);
-      setCameraError("Camera access was not allowed or is unavailable.");
-    }
-  }
-
-  function stopCamera(){
-    if(streamRef.current){
-      streamRef.current.getTracks().forEach(t=>t.stop());
-      streamRef.current=null;
-    }
-    if(videoRef.current) videoRef.current.srcObject=null;
-    setCameraOpen(false);
-  }
-
-  function captureSelfie(){
-    const video=videoRef.current;
-    if(!video || !video.videoWidth){
-      setCameraError("Camera is not ready yet.");
-      return;
-    }
-    const canvas=document.createElement("canvas");
-    const maxSide=1100;
-    const scale=Math.min(1,maxSide/Math.max(video.videoWidth,video.videoHeight));
-    canvas.width=Math.max(1,Math.round(video.videoWidth*scale));
-    canvas.height=Math.max(1,Math.round(video.videoHeight*scale));
-    const ctx=canvas.getContext("2d");
-    ctx.drawImage(video,0,0,canvas.width,canvas.height);
-    setSelfie(canvas.toDataURL("image/jpeg",0.72));
-    stopCamera();
-  }
 
   function calcDeadline(status){
     if(!settings) return null;
@@ -232,7 +171,7 @@ export default function Home(){
   }
 
   function staffLogout(){
-    stopCamera();
+    
     setSalesperson(null);
     setStep(1);
     setTx(null);
@@ -372,7 +311,7 @@ export default function Home(){
         </div>
 
         <div className="row">
-          <>
+          {salesperson ? <>
             <div style={{textAlign:"right",maxWidth:360,lineHeight:1.45}}>
               <div style={{fontWeight:950,fontSize:17}}>{salesperson.salesperson_name || salesperson.username}</div>
               <div className="muted"><b>BioMatrix ID:</b> {salesperson.biomatrix_id || biomatrixValue || "-"}</div>
@@ -381,7 +320,7 @@ export default function Home(){
               <div className="muted" style={{maxWidth:280,whiteSpace:"normal",wordBreak:"break-word"}}><b>Address:</b> {salesperson.address || "-"}</div>
             </div>
             <button className="btn btn-soft" onClick={staffLogout}>Logout</button>
-          </>
+          </>}
         </div>
       </div>
 
@@ -400,7 +339,7 @@ export default function Home(){
 
         {step===2 && <>
           <h1>Identity Verification</h1>
-          <p className="muted">Upload the front and back of the identification card, then take a selfie.</p>
+          <p className="muted">Upload the front and back of the identification card, then upload a selfie.</p>
 
           <div className="grid2">
             <div>
@@ -428,46 +367,57 @@ export default function Home(){
 
           <div className="card" style={{marginTop:16}}>
             <h3 style={{marginTop:0}}>Selfie</h3>
-            <p className="muted">After both card images are selected, open the camera and take a selfie.</p>
+            <p className="muted">Upload a clear selfie image.</p>
 
-            {!cameraOpen && !selfie && <button
-              className="btn btn-primary"
-              disabled={!idFront || !idBack}
-              style={{opacity:(!idFront || !idBack)?0.55:1}}
-              onClick={startCamera}
-            >Open Camera</button>}
-
-            {cameraOpen && <>
-              <video
-                ref={videoRef}
-                playsInline
-                muted
-                style={{width:"100%",maxWidth:520,borderRadius:16,background:"#111",display:"block",marginTop:10}}
+            <label className="btn btn-soft" style={{display:"inline-block"}}>
+              Upload Selfie
+              <input
+                type="file"
+                accept="image/*"
+                style={{display:"none"}}
+                onChange={e=>fileToPreview(e.target.files?.[0],setSelfie)}
               />
-              <div className="row" style={{marginTop:12}}>
-                <button className="btn btn-primary" onClick={captureSelfie}>Take Selfie</button>
-                <button className="btn btn-soft" onClick={stopCamera}>Cancel Camera</button>
-              </div>
-            </>}
+            </label>
 
             {selfie && <>
-              <img src={selfie} alt="Selfie preview" style={{width:"100%",maxWidth:360,maxHeight:360,objectFit:"cover",borderRadius:16,display:"block",marginTop:10}}/>
+              <img
+                src={selfie}
+                alt="Selfie preview"
+                style={{
+                  width:"100%",
+                  maxWidth:360,
+                  maxHeight:360,
+                  objectFit:"cover",
+                  borderRadius:16,
+                  display:"block",
+                  marginTop:10
+                }}
+              />
               <div className="row" style={{marginTop:12}}>
-                <button className="btn btn-soft" onClick={()=>{setSelfie("");startCamera();}}>Retake Selfie</button>
+                <label className="btn btn-soft" style={{display:"inline-block"}}>
+                  Replace Selfie
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{display:"none"}}
+                    onChange={e=>fileToPreview(e.target.files?.[0],setSelfie)}
+                  />
+                </label>
               </div>
             </>}
 
-            {cameraError && <div style={{marginTop:10,color:"#b42318",fontWeight:800}}>{cameraError}</div>}
-            <div className="muted" style={{marginTop:10}}>The selected images will be saved with the transaction when the transaction is submitted.</div>
+            <div className="muted" style={{marginTop:10}}>
+              The selected image will be saved with the transaction when the transaction is submitted.
+            </div>
           </div>
 
           <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
-            <button className="btn btn-soft" onClick={()=>{stopCamera();setStep(1)}}>Back</button>
+            <button className="btn btn-soft" onClick={()=>{setStep(1)}}>Back</button>
             <button
               className="btn btn-primary"
               disabled={!idFront || !idBack || !selfie}
               style={{opacity:(!idFront || !idBack || !selfie)?0.55:1}}
-              onClick={()=>{stopCamera();setStep(3)}}
+              onClick={()=>{setStep(3)}}
             >Continue</button>
           </div>
         </>}
@@ -566,7 +516,7 @@ export default function Home(){
           <div className="kv"><span>Date / Time</span><b>{fmtTime(tx?.created_at)}</b></div>
           <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
             <button className="btn btn-soft" onClick={()=>window.print()}>{settings.labels.printReceipt}</button>
-            <button className="btn btn-primary" onClick={()=>{stopCamera();setStep(1);setTx(null);setIdFront("");setIdBack("");setSelfie("");setForm({name:"",ic:"",bank:"",account:"",amount:"",reference:""})}}>{settings.labels.returnHome}</button>
+            <button className="btn btn-primary" onClick={()=>{setStep(1);setTx(null);setIdFront("");setIdBack("");setSelfie("");setForm({name:"",ic:"",bank:"",account:"",amount:"",reference:""})}}>{settings.labels.returnHome}</button>
           </div>
         </>}
       </div>
