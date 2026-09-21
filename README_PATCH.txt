@@ -1,13 +1,8 @@
-SELFIE UPLOAD ONLY PATCH
+SELFIE UPLOAD ONLY - BUILD FIX
 
 Changed file:
 - app/page.js
 
-Changes:
-- Removed camera opening/capture flow.
-- Selfie now works exactly like ID Front and ID Back:
-  - Upload Selfie
-  - Preview Selfie
-  - Replace Selfie
-- Continue stays disabled until Front + Back + Selfie are all present.
-- Existing transaction save logic still sends the selfie image with the transaction.
+Fix:
+- Corrected the JSX conditional in the logged-in staff header that caused Railway build to fail.
+- Keeps Upload Selfie / Preview / Replace Selfie flow.

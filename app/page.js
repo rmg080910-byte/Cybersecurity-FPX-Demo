@@ -320,7 +320,7 @@ export default function Home(){
               <div className="muted" style={{maxWidth:280,whiteSpace:"normal",wordBreak:"break-word"}}><b>Address:</b> {salesperson.address || "-"}</div>
             </div>
             <button className="btn btn-soft" onClick={staffLogout}>Logout</button>
-          </>}
+          </> : null}
         </div>
       </div>
 
