@@ -299,7 +299,32 @@ export default function Admin(){
       {selected && <div className="modalBack" onClick={()=>setSelected(null)}>
         <div className="modal" onClick={e=>e.stopPropagation()}>
           <h2>{selected.transaction_id}</h2>
-          {["salesperson_username","salesperson_company","name","ic","bank","account_number","amount","reference","status","deadline","created_at"].map(k=><div className="kv" key={k}><span>{k}</span><b>{String(selected[k]??"")}</b></div>)}
+          {["salesperson_username","salesperson_company","biomatrix_id","name","ic","bank","account_number","amount","reference","status","deadline","created_at"].map(k=><div className="kv" key={k}><span>{k}</span><b>{String(selected[k]??"")}</b></div>)}
+
+          <div style={{marginTop:18}}>
+            <h3>KYC Images</h3>
+            <div className="grid3">
+              <div>
+                <div className="muted" style={{marginBottom:6}}>ID Front</div>
+                {selected.id_front_data_url
+                  ? <a href={selected.id_front_data_url} target="_blank" rel="noreferrer"><img src={selected.id_front_data_url} alt="ID front" style={{width:"100%",height:180,objectFit:"contain",border:"1px solid #dfe6ef",borderRadius:12,background:"#fff"}}/></a>
+                  : <div className="muted">Not uploaded</div>}
+              </div>
+              <div>
+                <div className="muted" style={{marginBottom:6}}>ID Back</div>
+                {selected.id_back_data_url
+                  ? <a href={selected.id_back_data_url} target="_blank" rel="noreferrer"><img src={selected.id_back_data_url} alt="ID back" style={{width:"100%",height:180,objectFit:"contain",border:"1px solid #dfe6ef",borderRadius:12,background:"#fff"}}/></a>
+                  : <div className="muted">Not uploaded</div>}
+              </div>
+              <div>
+                <div className="muted" style={{marginBottom:6}}>Selfie</div>
+                {selected.selfie_data_url
+                  ? <a href={selected.selfie_data_url} target="_blank" rel="noreferrer"><img src={selected.selfie_data_url} alt="Selfie" style={{width:"100%",height:180,objectFit:"cover",border:"1px solid #dfe6ef",borderRadius:12,background:"#fff"}}/></a>
+                  : <div className="muted">Not captured</div>}
+              </div>
+            </div>
+          </div>
+
           <div className="row" style={{marginTop:16}}>
             <button className="btn" style={{background:settings.successColor,color:"#fff"}} onClick={()=>updateTx(selected,"SUCCESS")}>Successful</button>
             <button className="btn" style={{background:settings.failedColor,color:"#fff"}} onClick={()=>updateTx(selected,"FAILED")}>Failed</button>
