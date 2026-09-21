@@ -19,7 +19,7 @@ export default function Admin(){
   const [banks,setBanks]=useState([]);
   const [txs,setTxs]=useState([]);
   const [salespersons,setSalespersons]=useState([]);
-  const [newStaff,setNewStaff]=useState({username:"",password:"",company_name:"",logo_data_url:"",biomatrix_id:"",enabled:true});
+  const [newStaff,setNewStaff]=useState({username:"",salesperson_name:"",password:"",company_name:"",logo_data_url:"",biomatrix_id:"",logo_size:140,enabled:true});
   const [search,setSearch]=useState("");
   const [tab,setTab]=useState("dashboard");
   const [selected,setSelected]=useState(null);
@@ -61,7 +61,7 @@ export default function Admin(){
     const data=await r.json();
     if(!r.ok){ alert(data.error || "Unable to create salesperson."); return; }
     setSalespersons(x=>[data,...x]);
-    setNewStaff({username:"",password:"",company_name:"",logo_data_url:"",biomatrix_id:"",enabled:true});
+    setNewStaff({username:"",salesperson_name:"",password:"",company_name:"",logo_data_url:"",biomatrix_id:"",logo_size:140,enabled:true});
   }
 
   async function saveSalesperson(sp){
@@ -150,20 +150,31 @@ export default function Admin(){
 
       {tab==="salespersons" && <div className="card">
         <h2>Salespersons / Staff Login</h2>
-        <p className="muted">Each salesperson has a separate User ID, password, company name and logo. After login, the frontend header uses that salesperson's branding.</p>
+        <p className="muted">Each salesperson has a separate User ID, password, company name and logo. Adjust Logo Size with the slider and preview it here before saving.</p>
 
         <div className="card" style={{marginBottom:18,background:"#f8fafc"}}>
           <h3 style={{marginTop:0}}>Add Salesperson</h3>
           <div className="grid2">
             <div><label>User ID</label><input value={newStaff.username} onChange={e=>setNewStaff({...newStaff,username:e.target.value})}/></div>
+            <div><label>Salesperson Name</label><input value={newStaff.salesperson_name || ""} onChange={e=>setNewStaff({...newStaff,salesperson_name:e.target.value})}/></div>
             <div><label>Password</label><input type="password" value={newStaff.password} onChange={e=>setNewStaff({...newStaff,password:e.target.value})}/></div>
             <div><label>Company Name</label><input value={newStaff.company_name} onChange={e=>setNewStaff({...newStaff,company_name:e.target.value})}/></div>
             <div><label>BioMatrix ID (optional)</label><input placeholder="Leave blank = auto-generate" value={newStaff.biomatrix_id || ""} onChange={e=>setNewStaff({...newStaff,biomatrix_id:e.target.value})}/></div>
             <div>
               <label>Company Logo</label>
               <FileToData label="Upload Logo" onData={d=>setNewStaff({...newStaff,logo_data_url:d})}/>
-              {newStaff.logo_data_url && <img src={newStaff.logo_data_url} alt="" style={{display:"block",maxHeight:70,maxWidth:200,marginTop:8}}/>}
             </div>
+            <div>
+              <label>Logo Size: {newStaff.logo_size || 140}px</label>
+              <input type="range" min="60" max="260" step="5" value={newStaff.logo_size || 140} onChange={e=>setNewStaff({...newStaff,logo_size:Number(e.target.value)})}/>
+              <input type="number" min="60" max="260" value={newStaff.logo_size || 140} onChange={e=>setNewStaff({...newStaff,logo_size:Number(e.target.value)})} style={{marginTop:8}}/>
+            </div>
+            {newStaff.logo_data_url && <div style={{gridColumn:"1 / -1"}}>
+              <label>Live Preview</label>
+              <div style={{minHeight:120,padding:16,border:"1px dashed #cbd6e3",borderRadius:14,background:"#fff",display:"flex",alignItems:"center"}}>
+                <img src={newStaff.logo_data_url} alt="" style={{height:Math.max(60,Math.min(260,Number(newStaff.logo_size || 140))),maxWidth:"100%",objectFit:"contain"}}/>
+              </div>
+            </div>}
           </div>
           <button className="btn btn-primary" style={{marginTop:14}} onClick={createSalesperson}>Add Salesperson</button>
         </div>
@@ -172,15 +183,21 @@ export default function Admin(){
 
         {salespersons.map(sp=><div key={sp.id} className="card" style={{marginBottom:14}}>
           <div className="row" style={{alignItems:"flex-start"}}>
-            <div style={{width:74,height:74,border:"1px solid #dfe6ef",borderRadius:14,display:"grid",placeItems:"center",overflow:"hidden",background:"#fff"}}>
-              {sp.logo_data_url ? <img src={sp.logo_data_url} alt="" style={{width:"100%",height:"100%",objectFit:"contain"}}/> : <b>{sp.company_name?.slice(0,1) || "S"}</b>}
+            <div style={{width:Math.max(150,Math.min(360,Number(sp.logo_size || 140)*2)),minHeight:120,border:"1px dashed #cbd6e3",borderRadius:14,display:"grid",placeItems:"center",overflow:"hidden",background:"#fff",padding:10}}>
+              {sp.logo_data_url ? <img src={sp.logo_data_url} alt="" style={{height:Math.max(60,Math.min(260,Number(sp.logo_size || 140))),maxWidth:"100%",objectFit:"contain"}}/> : <b>{sp.company_name?.slice(0,1) || "S"}</b>}
             </div>
             <div style={{flex:1}}>
               <div className="grid2">
                 <div><label>User ID</label><input value={sp.username} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,username:e.target.value}:v))}/></div>
+                <div><label>Salesperson Name</label><input value={sp.salesperson_name || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,salesperson_name:e.target.value}:v))}/></div>
                 <div><label>Company Name</label><input value={sp.company_name} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,company_name:e.target.value}:v))}/></div>
                 <div><label>New Password (leave blank to keep)</label><input type="password" value={sp.password || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,password:e.target.value}:v))}/></div>
                 <div><label>BioMatrix ID</label><input value={sp.biomatrix_id || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,biomatrix_id:e.target.value}:v))}/></div>
+                <div>
+                  <label>Logo Size: {sp.logo_size || 140}px</label>
+                  <input type="range" min="60" max="260" step="5" value={sp.logo_size || 140} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,logo_size:Number(e.target.value)}:v))}/>
+                  <input type="number" min="60" max="260" value={sp.logo_size || 140} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,logo_size:Number(e.target.value)}:v))} style={{marginTop:8}}/>
+                </div>
                 <div>
                   <label>Status</label>
                   <select value={sp.enabled?"enabled":"disabled"} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,enabled:e.target.value==="enabled"}:v))}>

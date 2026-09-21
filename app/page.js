@@ -155,7 +155,7 @@ export default function Home(){
         <div className="row">
           {salesperson ? <>
             <div style={{textAlign:"right"}}>
-              <div style={{fontWeight:900}}>{salesperson.username}</div>
+              <div style={{fontWeight:900}}>{salesperson.salesperson_name || salesperson.username}</div>
               <div className="muted">{salesperson.biomatrix_id || biomatrixValue}</div>
             </div>
             <button className="btn btn-soft" onClick={staffLogout}>Logout</button>

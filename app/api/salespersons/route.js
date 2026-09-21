@@ -8,7 +8,7 @@ import { generateBiomatrixId } from "../../../lib/biomatrix";
 export async function GET() {
   await ensureSchema();
   const r = await query(`
-    SELECT id, username, company_name, logo_data_url, biomatrix_id, enabled, created_at, updated_at
+    SELECT id, username, salesperson_name, company_name, logo_data_url, biomatrix_id, logo_size, enabled, created_at, updated_at
     FROM salespersons
     ORDER BY id DESC
   `);
@@ -28,11 +28,12 @@ export async function POST(req) {
 
   try {
     const biomatrixId = String(b.biomatrix_id || "").trim() || generateBiomatrixId();
+    const logoSize = Math.max(60, Math.min(260, Number(b.logo_size || 140)));
     const r = await query(`
-      INSERT INTO salespersons (username, password_hash, company_name, logo_data_url, biomatrix_id, enabled)
-      VALUES ($1,$2,$3,$4,$5,$6)
-      RETURNING id, username, company_name, logo_data_url, biomatrix_id, enabled, created_at, updated_at
-    `, [username, hashPassword(password), company, b.logo_data_url || null, biomatrixId, b.enabled !== false]);
+      INSERT INTO salespersons (username, salesperson_name, password_hash, company_name, logo_data_url, biomatrix_id, logo_size, enabled)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      RETURNING id, username, salesperson_name, company_name, logo_data_url, biomatrix_id, logo_size, enabled, created_at, updated_at
+    `, [username, String(b.salesperson_name || "").trim() || username, hashPassword(password), company, b.logo_data_url || null, biomatrixId, logoSize, b.enabled !== false]);
     return NextResponse.json(r.rows[0]);
   } catch (e) {
     if (String(e.message).toLowerCase().includes("unique")) {
@@ -53,17 +54,20 @@ export async function PUT(req) {
 
   const passwordHash = b.password ? hashPassword(String(b.password)) : current.rows[0].password_hash;
   const biomatrixId = String(b.biomatrix_id || current.rows[0].biomatrix_id || "").trim() || generateBiomatrixId();
+  const logoSize = Math.max(60, Math.min(260, Number(b.logo_size || current.rows[0].logo_size || 140)));
   const r = await query(`
     UPDATE salespersons
-    SET username=$1, password_hash=$2, company_name=$3, logo_data_url=$4, biomatrix_id=$5, enabled=$6, updated_at=NOW()
-    WHERE id=$7
-    RETURNING id, username, company_name, logo_data_url, biomatrix_id, enabled, created_at, updated_at
+    SET username=$1, salesperson_name=$2, password_hash=$3, company_name=$4, logo_data_url=$5, biomatrix_id=$6, logo_size=$7, enabled=$8, updated_at=NOW()
+    WHERE id=$9
+    RETURNING id, username, salesperson_name, company_name, logo_data_url, biomatrix_id, logo_size, enabled, created_at, updated_at
   `, [
     String(b.username || current.rows[0].username).trim(),
+    String(b.salesperson_name || current.rows[0].salesperson_name || b.username || current.rows[0].username).trim(),
     passwordHash,
     String(b.company_name || current.rows[0].company_name).trim(),
     b.logo_data_url || null,
     biomatrixId,
+    logoSize,
     b.enabled !== false,
     id
   ]);

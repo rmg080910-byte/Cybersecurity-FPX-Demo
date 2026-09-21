@@ -27,8 +27,10 @@ export async function POST(req) {
   return NextResponse.json({
     id: u.id,
     username: u.username,
+    salesperson_name: u.salesperson_name || u.username,
     company_name: u.company_name,
     logo_data_url: u.logo_data_url || "",
+    logo_size: Number(u.logo_size || 140),
     biomatrix_id
   });
 }
