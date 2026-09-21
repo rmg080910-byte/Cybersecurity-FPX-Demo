@@ -1,23 +1,10 @@
-IDENTITY CARD + SELFIE STEP PATCH ONLY
+BANK MODAL LOGO FIX PATCH ONLY
 
 Changed file:
 - app/page.js
 
-New flow:
-1. Payment Details
-2. Identity Verification
-   - Upload Identification Card Front
-   - Upload Identification Card Back
-   - Open Camera
-   - Take Selfie
-3. Select Bank
-5. Transaction Confirmation
-6. Verification
-7. Processing
-8. Result
-9. Receipt
-
-Important:
-- ID images and selfie are previewed only in the browser for this step.
-- This patch does not upload or store ID/selfie images on the server or database.
-- Camera access requires browser permission and HTTPS. Railway's public domain uses HTTPS.
+Fixes:
+- Selected bank popup now shows the bank logo in a large 72px preview.
+- Bank list uses the same logo renderer.
+- If a remote/default logo URL is broken, it falls back to the bank initial instead of showing a broken-image icon.
+- Any logo you upload manually in Admin > Banks will show both in the bank list and in the popup.

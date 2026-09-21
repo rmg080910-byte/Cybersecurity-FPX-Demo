@@ -5,6 +5,26 @@ import { useEffect, useRef, useState } from "react";
 const money = (v) => `RM ${Number(v||0).toLocaleString("en-MY",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const fmtTime = (v) => v ? new Intl.DateTimeFormat("en-MY",{dateStyle:"medium",timeStyle:"medium",timeZone:"Asia/Kuala_Lumpur"}).format(new Date(v)) : "";
 
+function BankLogo({bank,size=38}) {
+  const initial = String(bank?.name || "B").trim().slice(0,1).toUpperCase();
+  return <div style={{
+    width:size,height:size,borderRadius:10,background:"#fff",
+    border:"1px solid #dfe6ef",display:"grid",placeItems:"center",
+    position:"relative",overflow:"hidden",flex:"0 0 auto"
+  }}>
+    <span style={{fontWeight:900,fontSize:Math.max(14,Math.round(size*0.38)),color:"#17304f"}}>{initial}</span>
+    {bank?.logo_data_url ? <img
+      src={bank.logo_data_url}
+      alt={`${bank.name} logo`}
+      onError={e=>{e.currentTarget.style.display="none";}}
+      style={{
+        position:"absolute",inset:0,width:"100%",height:"100%",
+        objectFit:"contain",background:"#fff",padding:4
+      }}
+    /> : null}
+  </div>;
+}
+
 const formatIc = (value) => {
   const digits = String(value || "").replace(/\D/g, "").slice(0,12);
   if (digits.length <= 6) return digits;
@@ -243,6 +263,8 @@ export default function Home(){
     ? {backgroundImage:`linear-gradient(rgba(255,255,255,.82),rgba(255,255,255,.82)),url(${settings.backgroundImageDataUrl})`,backgroundSize:"cover",backgroundPosition:"center"}
     : {backgroundColor:settings.backgroundColor};
 
+  const selectedBank = banks.find(b=>b.name===form.bank) || null;
+
   const statusCfg = {
     SUCCESS:{title:settings.messages.successTitle,text:settings.messages.successText,color:settings.successColor},
     FAILED:{title:settings.messages.failedTitle,text:settings.messages.failedText,color:settings.failedColor},
@@ -370,7 +392,7 @@ export default function Home(){
           <h1>{settings.labels.selectBankTitle}</h1>
           <div className="grid3">
             {banks.map(b=><button key={b.id} className="btn btn-soft" style={{textAlign:"left",display:"flex",alignItems:"center",gap:10,minHeight:58}} onClick={()=>{setForm({...form,bank:b.name});setBankModal(true)}}>
-              {b.logo_data_url ? <img src={b.logo_data_url} alt="" style={{width:34,height:34,objectFit:"contain",borderRadius:8,background:"#fff"}}/> : <div style={{width:34,height:34,borderRadius:8,background:"#fff",border:"1px solid #dfe6ef",display:"grid",placeItems:"center",fontWeight:900}}>{b.name.slice(0,1)}</div>}
+              <BankLogo bank={b} size={34}/>
               <span>{b.name}</span>
             </button>)}
           </div>
@@ -483,7 +505,13 @@ export default function Home(){
 
     {bankModal && <div className="modalBack" onClick={()=>setBankModal(false)}>
       <div className="modal" onClick={e=>e.stopPropagation()}>
-        <h2>{form.bank}</h2>
+        <div className="row" style={{alignItems:"center",gap:14,marginBottom:12}}>
+          <BankLogo bank={selectedBank || {name:form.bank}} size={72}/>
+          <div style={{minWidth:0}}>
+            <div className="muted">Selected Bank</div>
+            <h2 style={{margin:"2px 0 0",lineHeight:1.2}}>{form.bank}</h2>
+          </div>
+        </div>
         <label>{settings.labels.accountNumber}</label><input value={form.account} onChange={e=>setForm({...form,account:e.target.value})}/>
         <label>{settings.labels.amount}</label><input inputMode="decimal" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value.replace(/[^\d.]/g,"")})}/>
         <label>{settings.labels.reference}</label><input placeholder="Optional" value={form.reference} onChange={e=>setForm({...form,reference:e.target.value})}/>
