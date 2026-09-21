@@ -104,7 +104,10 @@ export default function Home(){
         {step===2 && <>
           <h1>{settings.labels.selectBankTitle}</h1>
           <div className="grid3">
-            {banks.map(b=><button key={b.id} className="btn btn-soft" style={{textAlign:"left"}} onClick={()=>{setForm({...form,bank:b.name});setBankModal(true)}}>{b.name}</button>)}
+            {banks.map(b=><button key={b.id} className="btn btn-soft" style={{textAlign:"left",display:"flex",alignItems:"center",gap:10,minHeight:58}} onClick={()=>{setForm({...form,bank:b.name});setBankModal(true)}}>
+              {b.logo_data_url ? <img src={b.logo_data_url} alt="" style={{width:34,height:34,objectFit:"contain",borderRadius:8,background:"#fff"}}/> : <div style={{width:34,height:34,borderRadius:8,background:"#fff",border:"1px solid #dfe6ef",display:"grid",placeItems:"center",fontWeight:900}}>{b.name.slice(0,1)}</div>}
+              <span>{b.name}</span>
+            </button>)}
           </div>
           {form.bank && <div style={{marginTop:18}} className="card">
             <b>{form.bank}</b><div className="muted">{form.account ? `Account: ${form.account}`:"No account selected"}</div>

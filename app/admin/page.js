@@ -154,10 +154,23 @@ export default function Admin(){
       </div>}
 
       {tab==="banks" && <div className="card">
-        <h2>Banks</h2><p className="muted">Enable / disable banks and reorder them.</p>
-        {banks.map((b,i)=><div className="row" key={b.id} style={{padding:"8px 0",borderBottom:"1px solid #edf1f5"}}>
+        <h2>Banks</h2><p className="muted">Enable / disable banks, upload each bank logo, and reorder them. Click Save Banks after changes.</p>
+        {banks.map((b,i)=><div className="row" key={b.id} style={{padding:"10px 0",borderBottom:"1px solid #edf1f5"}}>
           <input type="checkbox" style={{width:18}} checked={b.enabled} onChange={e=>setBanks(x=>x.map(v=>v.id===b.id?{...v,enabled:e.target.checked}:v))}/>
-          <div style={{flex:1}}>{b.name}</div>
+          <div style={{width:44,height:44,border:"1px solid #dfe6ef",borderRadius:10,background:"#fff",display:"grid",placeItems:"center",overflow:"hidden"}}>
+            {b.logo_data_url ? <img src={b.logo_data_url} alt="" style={{width:"100%",height:"100%",objectFit:"contain"}}/> : <span style={{fontWeight:900}}>{b.name.slice(0,1)}</span>}
+          </div>
+          <div style={{flex:1,minWidth:220}}>{b.name}</div>
+          <label className="btn btn-soft" style={{display:"inline-block"}}>
+            Upload Logo
+            <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" style={{display:"none"}} onChange={e=>{
+              const f=e.target.files?.[0]; if(!f) return;
+              const r=new FileReader();
+              r.onload=()=>setBanks(x=>x.map(v=>v.id===b.id?{...v,logo_data_url:r.result}:v));
+              r.readAsDataURL(f);
+            }}/>
+          </label>
+          {b.logo_data_url && <button className="btn btn-soft" onClick={()=>setBanks(x=>x.map(v=>v.id===b.id?{...v,logo_data_url:""}:v))}>Remove Logo</button>}
           <button className="btn btn-soft" onClick={()=>i>0&&setBanks(x=>{const a=[...x];[a[i-1],a[i]]=[a[i],a[i-1]];return a})}>↑</button>
           <button className="btn btn-soft" onClick={()=>i<banks.length-1&&setBanks(x=>{const a=[...x];[a[i+1],a[i]]=[a[i],a[i+1]];return a})}>↓</button>
         </div>)}
