@@ -1,8 +1,8 @@
 
 import { NextResponse } from "next/server";
-import { ensureSchema } from "../../../../lib/schema";
-import { defaultBanks, defaultSettings } from "../../../../lib/defaults";
-import { query } from "../../../../lib/db";
+import { ensureSchema } from "../../../lib/schema";
+import { defaultBanks, defaultSettings } from "../../../lib/defaults";
+import { query } from "../../../lib/db";
 
 export async function POST() {
   try {
