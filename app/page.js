@@ -200,35 +200,70 @@ export default function Home(){
   );
 
   useEffect(()=>{
-    if(step !== 10 || !salesperson || uploadLink || linkBusy || !customerDetailsReady) return;
+    if(step !== 10 || !salesperson || uploadLink || !customerDetailsReady) return;
     if(autoLinkStartedRef.current) return;
 
     autoLinkStartedRef.current = true;
     setLinkError("");
+    setLinkBusy(true);
     setLinkProgress(1);
 
+    let cancelled = false;
     const startedAt = Date.now();
     const timer = setInterval(()=>{
       const elapsed = Date.now() - startedAt;
-      const pct = Math.min(99, Math.max(1, Math.floor((elapsed / 3000) * 100)));
-      setLinkProgress(pct);
+      const pct = Math.min(100, Math.max(1, Math.floor((elapsed / 3000) * 100)));
+      if(!cancelled) setLinkProgress(pct);
     }, 30);
 
-    const finish = setTimeout(async ()=>{
-      clearInterval(timer);
+    (async()=>{
       try{
-        await createUploadLink(true);
+        const request = fetch("/api/upload-links",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            transaction_id:tx?.id || null,
+            biomatrix_id:biomatrixValue,
+            name:form.name,
+            ic:form.ic,
+            customer_bank_name:form.customerBankName,
+            customer_bank_account:form.customerBankAccount,
+            customer_address:form.customerAddress,
+            salesperson_id:salesperson?.id || null,
+            salesperson_username:salesperson?.username || null,
+            salesperson_company:salesperson?.company_name || null
+          })
+        }).then(async r=>{
+          const data=await r.json();
+          if(!r.ok) throw new Error(data.error || "Unable to generate upload link.");
+          return data;
+        });
+
+        const [data] = await Promise.all([
+          request,
+          new Promise(resolve=>setTimeout(resolve,3000))
+        ]);
+
+        if(cancelled) return;
+        clearInterval(timer);
         setLinkProgress(100);
-      } finally {
-        setTimeout(()=>setLinkProgress(0), 450);
+        if(data.transaction) setTx(data.transaction);
+        setUploadLink(`${window.location.origin}${data.path}`);
+      }catch(e){
+        if(cancelled) return;
+        clearInterval(timer);
+        setLinkError(e.message || "Unable to generate upload link.");
+        autoLinkStartedRef.current=false;
+      }finally{
+        if(!cancelled) setLinkBusy(false);
       }
-    }, 3000);
+    })();
 
     return ()=>{
+      cancelled = true;
       clearInterval(timer);
-      clearTimeout(finish);
     };
-  }, [step, salesperson, uploadLink, linkBusy, customerDetailsReady]);
+  }, [step, salesperson, uploadLink, customerDetailsReady]);
 
   async function createUploadLink(isAuto=false){
     if(!customerDetailsReady){
@@ -454,12 +489,12 @@ export default function Home(){
 
         {step===10 && <>
           <div style={{maxWidth:760,margin:"0 auto",padding:"28px 0"}}>
-            <h1 style={{textAlign:"center"}}>Generate Customer Upload Link</h1>
+            <h1 style={{textAlign:"center"}}>Processing</h1>
 
             {!uploadLink ? <>
               <div style={{marginTop:34}}>
                 <div style={{display:"flex",justifyContent:"space-between",fontWeight:900,marginBottom:10}}>
-                  <span>{"Generating secure upload link" + ".".repeat((Math.floor((linkProgress || 1) / 12) % 3) + 1)}</span>
+                  <span>{"Loading" + ".".repeat((Math.floor((linkProgress || 1) / 12) % 3) + 1)}</span>
                   <span>{Math.max(1,linkProgress || 1)}%</span>
                 </div>
 
@@ -473,10 +508,6 @@ export default function Home(){
                       borderRadius:999
                     }}
                   />
-                </div>
-
-                <div className="muted" style={{textAlign:"center",marginTop:12}}>
-                  Please wait. The link will be ready automatically in about 3 seconds.
                 </div>
 
                 {linkError && <>
