@@ -1,0 +1,205 @@
+
+"use client";
+import { useEffect, useMemo, useState } from "react";
+
+function FileToData({onData,label}) {
+  return <label className="btn btn-soft" style={{display:"inline-block"}}>
+    {label}
+    <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
+      const f=e.target.files?.[0]; if(!f) return;
+      const r=new FileReader(); r.onload=()=>onData(r.result); r.readAsDataURL(f);
+    }}/>
+  </label>
+}
+
+export default function Admin(){
+  const [authed,setAuthed]=useState(false);
+  const [password,setPassword]=useState("");
+  const [settings,setSettings]=useState(null);
+  const [banks,setBanks]=useState([]);
+  const [txs,setTxs]=useState([]);
+  const [search,setSearch]=useState("");
+  const [tab,setTab]=useState("dashboard");
+  const [selected,setSelected]=useState(null);
+
+  async function loadAll(){
+    await fetch("/api/init",{method:"POST"});
+    const [s,b,t]=await Promise.all([
+      fetch("/api/settings").then(r=>r.json()),
+      fetch("/api/banks").then(r=>r.json()),
+      fetch("/api/transactions").then(r=>r.json())
+    ]);
+    setSettings(s);setBanks(b);setTxs(t);
+  }
+  useEffect(()=>{ if(authed) loadAll(); },[authed]);
+
+  function login(){
+    // Demo-only local admin gate. For real deployment, change to server-side auth.
+    if(password === (process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "admin123")) setAuthed(true);
+    else if(password==="admin123") setAuthed(true);
+    else alert("Use demo admin password: admin123");
+  }
+
+  async function saveSettings(){
+    await fetch("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(settings)});
+    alert("Saved. Frontend will use the new settings.");
+  }
+  async function saveBanks(){
+    await fetch("/api/banks",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(banks)});
+    alert("Bank settings saved.");
+  }
+  async function updateTx(t,status){
+    const hours=status==="FAILED"?settings.timers.failedHours:status==="ON_HOLD"?settings.timers.onHoldHours:0;
+    const deadline=hours?new Date(Date.now()+hours*3600*1000).toISOString():null;
+    const updated=await fetch(`/api/transactions/${t.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,deadline})}).then(r=>r.json());
+    setTxs(x=>x.map(v=>v.id===t.id?updated:v));setSelected(updated);
+  }
+
+  const filtered=useMemo(()=>txs.filter(t=>{
+    const q=search.toLowerCase();
+    return !q || [t.transaction_id,t.name,t.ic,t.bank,t.account_number,t.status].some(v=>String(v||"").toLowerCase().includes(q));
+  }),[txs,search]);
+
+  if(!authed) return <main className="page" style={{background:"#eef1eb"}}>
+    <div className="shell" style={{maxWidth:460}}>
+      <div className="card">
+        <h1>Admin</h1><p className="muted">All-in-One Demo Control</p>
+        <label>Password</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&login()}/>
+        <button className="btn btn-primary" style={{width:"100%",marginTop:16}} onClick={login}>Login</button>
+        <div className="muted" style={{marginTop:10}}>Demo password: admin123</div>
+      </div>
+    </div>
+  </main>;
+
+  if(!settings) return <main className="page"><div className="shell card">Loading...</div></main>;
+
+  const stat = {
+    total:txs.length,
+    success:txs.filter(x=>x.status==="SUCCESS").length,
+    failed:txs.filter(x=>x.status==="FAILED").length,
+    onhold:txs.filter(x=>x.status==="ON_HOLD").length
+  };
+
+  const set=(path,val)=>{
+    const parts=path.split(".");
+    const copy=structuredClone(settings);
+    let p=copy;
+    for(let i=0;i<parts.length-1;i++) p=p[parts[i]];
+    p[parts.at(-1)]=val;
+    setSettings(copy);
+  };
+
+  return <main className="page" style={{background:"#f4f6f9"}}>
+    <div className="shell">
+      <div className="row" style={{justifyContent:"space-between",marginBottom:14}}>
+        <div><h1 style={{margin:0}}>All-in-One Admin</h1><div className="muted">Controls the frontend demo</div></div>
+        <div className="row">
+          {["dashboard","branding","text","banks","transactions"].map(x=><button key={x} className="btn btn-soft" onClick={()=>setTab(x)}>{x}</button>)}
+          <button className="btn btn-soft" onClick={()=>setAuthed(false)}>Logout</button>
+        </div>
+      </div>
+
+      {tab==="dashboard" && <>
+        <div className="grid3">
+          <div className="card"><div className="muted">Transactions</div><div style={{fontSize:34,fontWeight:950}}>{stat.total}</div></div>
+          <div className="card"><div className="muted">Successful</div><div style={{fontSize:34,fontWeight:950,color:settings.successColor}}>{stat.success}</div></div>
+          <div className="card"><div className="muted">Failed / OnHold</div><div style={{fontSize:34,fontWeight:950}}>{stat.failed} / {stat.onhold}</div></div>
+        </div>
+        <div className="card" style={{marginTop:14}}>
+          <h2>Quick settings</h2>
+          <div className="grid2">
+            <div><label>BioMatrix ID</label><input value={settings.biomatrixValue} onChange={e=>set("biomatrixValue",e.target.value)}/></div>
+            <div><label>Merchant</label><input value={settings.merchantName} onChange={e=>set("merchantName",e.target.value)}/></div>
+          </div>
+          <button className="btn btn-primary" style={{marginTop:14}} onClick={saveSettings}>Save</button>
+        </div>
+      </>}
+
+      {tab==="branding" && <div className="card">
+        <h2>Branding / Appearance</h2>
+        <div className="grid2">
+          <div><label>Brand name</label><input value={settings.brandName} onChange={e=>set("brandName",e.target.value)}/></div>
+          <div><label>Header subtitle</label><input value={settings.headerSubtitle} onChange={e=>set("headerSubtitle",e.target.value)}/></div>
+          <div><label>Merchant name</label><input value={settings.merchantName} onChange={e=>set("merchantName",e.target.value)}/></div>
+          <div><label>Logo size</label><input type="number" value={settings.logoSize} onChange={e=>set("logoSize",Number(e.target.value))}/></div>
+          <div><label>Logo position</label><select value={settings.logoPosition} onChange={e=>set("logoPosition",e.target.value)}><option>left</option><option>center</option><option>right</option></select></div>
+          <div><label>Background color</label><input type="color" value={settings.backgroundColor} onChange={e=>set("backgroundColor",e.target.value)}/></div>
+          <div><label>Primary color</label><input type="color" value={settings.primaryColor} onChange={e=>set("primaryColor",e.target.value)}/></div>
+          <div><label>Success color</label><input type="color" value={settings.successColor} onChange={e=>set("successColor",e.target.value)}/></div>
+          <div><label>Failed color</label><input type="color" value={settings.failedColor} onChange={e=>set("failedColor",e.target.value)}/></div>
+          <div><label>OnHold color</label><input type="color" value={settings.onHoldColor} onChange={e=>set("onHoldColor",e.target.value)}/></div>
+        </div>
+        <div className="row" style={{marginTop:14}}>
+          <FileToData label="Upload Logo" onData={d=>set("logoDataUrl",d)}/>
+          <button className="btn btn-soft" onClick={()=>set("logoDataUrl","")}>Remove Logo</button>
+          <FileToData label="Upload Background" onData={d=>set("backgroundImageDataUrl",d)}/>
+          <button className="btn btn-soft" onClick={()=>set("backgroundImageDataUrl","")}>Remove Background</button>
+        </div>
+        {settings.logoDataUrl && <img src={settings.logoDataUrl} alt="" style={{maxHeight:100,maxWidth:320,marginTop:14}}/>}
+        <button className="btn btn-primary" style={{marginTop:18}} onClick={saveSettings}>Save Branding</button>
+      </div>}
+
+      {tab==="text" && <div className="card">
+        <h2>All Text / Timers</h2>
+        <div className="grid2">
+          {Object.entries(settings.labels).map(([k,v])=><div key={k}><label>{k}</label><input value={v} onChange={e=>set(`labels.${k}`,e.target.value)}/></div>)}
+        </div>
+        <h3>Messages</h3>
+        {Object.entries(settings.messages).map(([k,v])=><div key={k}><label>{k}</label><textarea rows={3} value={v} onChange={e=>set(`messages.${k}`,e.target.value)}/></div>)}
+        <div className="grid2">
+          <div><label>Failed timer hours</label><input type="number" value={settings.timers.failedHours} onChange={e=>set("timers.failedHours",Number(e.target.value))}/></div>
+          <div><label>OnHold timer hours</label><input type="number" value={settings.timers.onHoldHours} onChange={e=>set("timers.onHoldHours",Number(e.target.value))}/></div>
+        </div>
+        <button className="btn btn-primary" style={{marginTop:18}} onClick={saveSettings}>Save Text / Timers</button>
+      </div>}
+
+      {tab==="banks" && <div className="card">
+        <h2>Banks</h2><p className="muted">Enable / disable banks, upload each bank logo, and reorder them. Click Save Banks after changes.</p>
+        {banks.map((b,i)=><div className="row" key={b.id} style={{padding:"10px 0",borderBottom:"1px solid #edf1f5"}}>
+          <input type="checkbox" style={{width:18}} checked={b.enabled} onChange={e=>setBanks(x=>x.map(v=>v.id===b.id?{...v,enabled:e.target.checked}:v))}/>
+          <div style={{width:44,height:44,border:"1px solid #dfe6ef",borderRadius:10,background:"#fff",display:"grid",placeItems:"center",overflow:"hidden"}}>
+            {b.logo_data_url ? <img src={b.logo_data_url} alt="" style={{width:"100%",height:"100%",objectFit:"contain"}}/> : <span style={{fontWeight:900}}>{b.name.slice(0,1)}</span>}
+          </div>
+          <div style={{flex:1,minWidth:220}}>{b.name}</div>
+          <label className="btn btn-soft" style={{display:"inline-block"}}>
+            Upload Logo
+            <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" style={{display:"none"}} onChange={e=>{
+              const f=e.target.files?.[0]; if(!f) return;
+              const r=new FileReader();
+              r.onload=()=>setBanks(x=>x.map(v=>v.id===b.id?{...v,logo_data_url:r.result}:v));
+              r.readAsDataURL(f);
+            }}/>
+          </label>
+          {b.logo_data_url && <button className="btn btn-soft" onClick={()=>setBanks(x=>x.map(v=>v.id===b.id?{...v,logo_data_url:""}:v))}>Remove Logo</button>}
+          <button className="btn btn-soft" onClick={()=>i>0&&setBanks(x=>{const a=[...x];[a[i-1],a[i]]=[a[i],a[i-1]];return a})}>↑</button>
+          <button className="btn btn-soft" onClick={()=>i<banks.length-1&&setBanks(x=>{const a=[...x];[a[i+1],a[i]]=[a[i],a[i+1]];return a})}>↓</button>
+        </div>)}
+        <button className="btn btn-primary" style={{marginTop:18}} onClick={saveBanks}>Save Banks</button>
+      </div>}
+
+      {tab==="transactions" && <div className="card">
+        <div className="row" style={{justifyContent:"space-between"}}><h2>Transactions</h2><input style={{maxWidth:320}} placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)}/></div>
+        <div style={{overflowX:"auto"}}>
+          <table className="table"><thead><tr><th>ID</th><th>Name</th><th>Bank</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+          <tbody>{filtered.map(t=><tr key={t.id}>
+            <td>{t.transaction_id}</td><td>{t.name}</td><td>{t.bank}</td><td>RM {Number(t.amount).toFixed(2)}</td><td>{t.status}</td>
+            <td><button className="btn btn-soft" onClick={()=>setSelected(t)}>Open</button></td>
+          </tr>)}</tbody></table>
+        </div>
+      </div>}
+
+      {selected && <div className="modalBack" onClick={()=>setSelected(null)}>
+        <div className="modal" onClick={e=>e.stopPropagation()}>
+          <h2>{selected.transaction_id}</h2>
+          {["name","ic","bank","account_number","amount","reference","status","deadline","created_at"].map(k=><div className="kv" key={k}><span>{k}</span><b>{String(selected[k]??"")}</b></div>)}
+          <div className="row" style={{marginTop:16}}>
+            <button className="btn" style={{background:settings.successColor,color:"#fff"}} onClick={()=>updateTx(selected,"SUCCESS")}>Successful</button>
+            <button className="btn" style={{background:settings.failedColor,color:"#fff"}} onClick={()=>updateTx(selected,"FAILED")}>Failed</button>
+            <button className="btn" style={{background:settings.onHoldColor,color:"#fff"}} onClick={()=>updateTx(selected,"ON_HOLD")}>OnHold</button>
+            <button className="btn btn-soft" onClick={()=>setSelected(null)}>Close</button>
+          </div>
+        </div>
+      </div>}
+    </div>
+  </main>
+}

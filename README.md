@@ -67,3 +67,15 @@ The app initializes its tables automatically on first use.
 ## Important demo limitation
 
 This project is intended as a simulation/training demo. It does **not** connect to FPX, any real bank, real OTP/TAC, or real KYC systems. Do not enter real banking credentials or real OTP/TAC.
+
+
+## Bank logo upload
+
+In `/admin` → `banks`, every bank now has:
+
+- Upload Logo
+- Remove Logo
+- Enable / disable
+- Reorder
+
+Uploaded bank logos are stored with the bank record in PostgreSQL and shown on the frontend bank selection screen.
