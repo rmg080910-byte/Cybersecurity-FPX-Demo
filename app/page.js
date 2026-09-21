@@ -372,7 +372,7 @@ export default function Home(){
         </div>
 
         <div className="row">
-          {salesperson ? <>
+          <>
             <div style={{textAlign:"right",maxWidth:360,lineHeight:1.45}}>
               <div style={{fontWeight:950,fontSize:17}}>{salesperson.salesperson_name || salesperson.username}</div>
               <div className="muted"><b>BioMatrix ID:</b> {salesperson.biomatrix_id || biomatrixValue || "-"}</div>
@@ -381,7 +381,7 @@ export default function Home(){
               <div className="muted" style={{maxWidth:280,whiteSpace:"normal",wordBreak:"break-word"}}><b>Address:</b> {salesperson.address || "-"}</div>
             </div>
             <button className="btn btn-soft" onClick={staffLogout}>Logout</button>
-          </>}
+          </>
         </div>
       </div>
 

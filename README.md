@@ -1,100 +1,23 @@
+# Cybersecurity FPX / e-KYC Project
 
-# CYBERSECURITY FPX Demo — Frontend + All-in-One Admin
+Clean project structure for Railway + PostgreSQL.
 
-Two pages only:
+## Routes
+- `/` frontend
+- `/admin` admin
 
-- `/` — frontend demo
-- `/admin` — all-in-one admin control panel
+## Railway
+Required variable: `DATABASE_URL` referencing the Railway PostgreSQL service.
 
-## What the admin can change
+## Included features
+- Staff login first page
+- Per-staff name, company, logo, logo size, BioMatrix ID, bank details and address
+- IC format limit `000000-00-0000`
+- Identity front/back upload + camera selfie
+- Saved KYC images attached to transactions
+- Bank list with uploadable logos and modal logo preview
+- Case-based status rule from staff User ID
+- Internal 6-digit verification code
+- Transaction status control in Admin
 
-- Logo upload / replace / remove
-- Background image upload / replace / remove
-- Brand name, merchant name, header subtitle
-- Logo size and position
-- Background / primary / success / failed / on-hold colors
-- Frontend labels and result messages
-- BioMatrix label/value
-- Failed and OnHold timer hours
-- Bank enable/disable and ordering
-- Transactions list and status override
-
-The frontend reads settings from PostgreSQL, so changes made in `/admin` affect the frontend without editing source code.
-
-## Demo status rule
-
-The frontend uses the **Demo User ID** only for simulation:
-
-- letters all uppercase → Successful
-- letters all lowercase → Failed
-- mixed uppercase/lowercase → OnHold
-- numbers/symbols only → Successful
-
-The demo password is not stored in PostgreSQL.
-
-## Local setup
-
-1. Install Node.js 20+
-2. Create a PostgreSQL database.
-3. Copy `.env.example` to `.env.local`
-4. Set `DATABASE_URL`
-5. Run:
-
-```bash
-npm install
-npm run dev
-```
-
-6. Open:
-   - frontend: `http://localhost:3000`
-   - admin: `http://localhost:3000/admin`
-
-Demo admin password: `admin123`
-
-## Railway + GitHub
-
-1. Create a new GitHub repo.
-2. Upload this project.
-3. In Railway create a new project from the GitHub repo.
-4. Add a PostgreSQL service.
-5. Add the PostgreSQL `DATABASE_URL` to the web service variables.
-6. Railway build command: `npm run build`
-7. Railway start command: `npm start`
-8. Deploy.
-
-The app initializes its tables automatically on first use.
-
-## Important demo limitation
-
-This project is intended as a simulation/training demo. It does **not** connect to FPX, any real bank, real OTP/TAC, or real KYC systems. Do not enter real banking credentials or real OTP/TAC.
-
-
-## Bank logo upload
-
-In `/admin` → `banks`, every bank now has:
-
-- Upload Logo
-- Remove Logo
-- Enable / disable
-- Reorder
-
-Uploaded bank logos are stored with the bank record in PostgreSQL and shown on the frontend bank selection screen.
-
-
-## Staff / salesperson multi-brand login
-
-Admin now has a `salespersons` tab.
-
-For each salesperson you can set:
-- User ID
-- Password
-- Company name
-- Company logo
-- Enabled / disabled
-
-Frontend behavior:
-- Staff Login is in the top-right.
-- Customer/payment page no longer contains staff User ID / Password fields.
-- After staff login, the header automatically switches to that salesperson's company name and logo.
-- Each transaction stores the salesperson username and company.
-- Transaction result page polls the backend, so an Admin status change can update an open frontend transaction.
+Use synthetic/test identity images for tutorial and testing. Do not enter real bank OTP/TAC credentials.
