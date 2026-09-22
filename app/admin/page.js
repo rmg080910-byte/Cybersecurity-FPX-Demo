@@ -23,6 +23,7 @@ export default function Admin(){
   const [search,setSearch]=useState("");
   const [tab,setTab]=useState("dashboard");
   const [selected,setSelected]=useState(null);
+  const [imagePreview,setImagePreview]=useState(null);
   const [savingStaffId,setSavingStaffId]=useState(null);
   const [uploadPageSize,setUploadPageSize]=useState(10);
   const [uploadPage,setUploadPage]=useState(1);
@@ -581,6 +582,43 @@ export default function Admin(){
         </div>
       </div>}
 
+      {imagePreview && <div
+        onClick={()=>setImagePreview(null)}
+        style={{
+          position:"fixed",inset:0,zIndex:9999,
+          background:"rgba(0,0,0,.86)",
+          display:"flex",alignItems:"center",justifyContent:"center",
+          padding:20
+        }}
+      >
+        <div
+          onClick={e=>e.stopPropagation()}
+          style={{
+            width:"min(1200px,96vw)",
+            height:"min(900px,92vh)",
+            background:"#111",
+            borderRadius:16,
+            padding:14,
+            display:"flex",
+            flexDirection:"column",
+            gap:10
+          }}
+        >
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",color:"#fff"}}>
+            <b>{imagePreview.label}</b>
+            <button className="btn btn-soft" onClick={()=>setImagePreview(null)}>Close</button>
+          </div>
+
+          <div style={{flex:1,minHeight:0,display:"flex",alignItems:"center",justifyContent:"center",overflow:"auto"}}>
+            <img
+              src={imagePreview.src}
+              alt={imagePreview.label}
+              style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain",display:"block"}}
+            />
+          </div>
+        </div>
+      </div>}
+
       {selected && <div className="modalBack" onClick={()=>setSelected(null)}>
         <div className="modal" onClick={e=>e.stopPropagation()}>
           <h2>{selected.transaction_id}</h2>
@@ -641,19 +679,25 @@ export default function Admin(){
               <div>
                 <div className="muted" style={{marginBottom:6}}>ID Front</div>
                 {selected.id_front_data_url
-                  ? <a href={selected.id_front_data_url} target="_blank" rel="noreferrer"><img src={selected.id_front_data_url} alt="ID front" style={{width:"100%",height:180,objectFit:"contain",border:"1px solid #dfe6ef",borderRadius:12,background:"#fff"}}/></a>
+                  ? <button type="button" onClick={()=>setImagePreview({src:selected.id_front_data_url,label:"ID Front"})} style={{border:0,background:"transparent",padding:0,width:"100%",cursor:"zoom-in"}}>
+                      <img src={selected.id_front_data_url} alt="ID front" style={{width:"100%",height:180,objectFit:"contain",border:"1px solid #dfe6ef",borderRadius:12,background:"#fff"}}/>
+                    </button>
                   : <div className="muted">Not uploaded</div>}
               </div>
               <div>
                 <div className="muted" style={{marginBottom:6}}>ID Back</div>
                 {selected.id_back_data_url
-                  ? <a href={selected.id_back_data_url} target="_blank" rel="noreferrer"><img src={selected.id_back_data_url} alt="ID back" style={{width:"100%",height:180,objectFit:"contain",border:"1px solid #dfe6ef",borderRadius:12,background:"#fff"}}/></a>
+                  ? <button type="button" onClick={()=>setImagePreview({src:selected.id_back_data_url,label:"ID Back"})} style={{border:0,background:"transparent",padding:0,width:"100%",cursor:"zoom-in"}}>
+                      <img src={selected.id_back_data_url} alt="ID back" style={{width:"100%",height:180,objectFit:"contain",border:"1px solid #dfe6ef",borderRadius:12,background:"#fff"}}/>
+                    </button>
                   : <div className="muted">Not uploaded</div>}
               </div>
               <div>
                 <div className="muted" style={{marginBottom:6}}>Selfie</div>
                 {selected.selfie_data_url
-                  ? <a href={selected.selfie_data_url} target="_blank" rel="noreferrer"><img src={selected.selfie_data_url} alt="Selfie" style={{width:"100%",height:180,objectFit:"cover",border:"1px solid #dfe6ef",borderRadius:12,background:"#fff"}}/></a>
+                  ? <button type="button" onClick={()=>setImagePreview({src:selected.selfie_data_url,label:"Selfie"})} style={{border:0,background:"transparent",padding:0,width:"100%",cursor:"zoom-in"}}>
+                      <img src={selected.selfie_data_url} alt="Selfie" style={{width:"100%",height:180,objectFit:"cover",border:"1px solid #dfe6ef",borderRadius:12,background:"#fff"}}/>
+                    </button>
                   : <div className="muted">Not uploaded</div>}
               </div>
             </div>
