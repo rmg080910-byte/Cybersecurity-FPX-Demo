@@ -201,6 +201,73 @@ export default function Home(){
     setLoginOpen(false);
   }
 
+  function goHome(){
+    setBankModal(false);
+    setStep(1);
+  }
+
+  function goBack(){
+    setBankModal(false);
+    const prev={
+      10:1,
+      2:10,
+      3:2,
+      5:3,
+      6:5,
+      8:7,
+      9:8
+    };
+    setStep(prev[step] ?? 1);
+  }
+
+  function goNext(){
+    setBankModal(false);
+
+    if(step===1){
+      if(!customerDetailsReady) return;
+      setLinkError("");
+      setLinkProgress(0);
+      autoLinkStartedRef.current=false;
+      setStep(10);
+      return;
+    }
+
+    if(step===10){
+      if(uploadLink) setStep(2);
+      return;
+    }
+
+    if(step===2){ setStep(3); return; }
+
+    if(step===3){
+      if(form.bank && form.account && form.amount) setStep(5);
+      return;
+    }
+
+    if(step===5){ setStep(6); return; }
+
+    if(step===6){
+      if(verificationPassed) setStep(7);
+      return;
+    }
+
+    if(step===8){ setStep(9); return; }
+
+    if(step===9){ setStep(1); return; }
+  }
+
+  function canGoNext(){
+    if(step===1) return customerDetailsReady;
+    if(step===10) return !!uploadLink;
+    if(step===2) return true;
+    if(step===3) return !!(form.bank && form.account && form.amount);
+    if(step===5) return true;
+    if(step===6) return verificationPassed;
+    if(step===8) return true;
+    if(step===9) return true;
+    return false;
+  }
+
   function staffLogout(){
     
     setSalesperson(null);
@@ -459,13 +526,27 @@ export default function Home(){
         <div className="row" style={{justifyContent:settings.logoPosition==="center"?"center":"flex-start",flex:1,minHeight:112}}>
           {brandLogo ? (
             <div style={{width:Math.max(360,staffLogoSize*2.6),height:staffLogoSize+16,display:"flex",alignItems:"center",justifyContent:settings.logoPosition==="center"?"center":"flex-start",overflow:"hidden"}}>
-              <img src={brandLogo} alt="" style={{height:staffLogoSize,maxHeight:260,maxWidth:Math.max(350,staffLogoSize*2.5),width:"auto",objectFit:"contain",display:"block"}}/>
+              <button
+                type="button"
+                onClick={goHome}
+                title="Home"
+                aria-label="Go to home"
+                style={{border:0,background:"transparent",padding:0,cursor:"pointer",display:"block"}}
+              >
+                <img src={brandLogo} alt="" style={{height:staffLogoSize,maxHeight:260,maxWidth:Math.max(350,staffLogoSize*2.5),width:"auto",objectFit:"contain",display:"block"}}/>
+              </button>
             </div>
           ) : (
-            <div>
+            <button
+              type="button"
+              onClick={goHome}
+              title="Home"
+              aria-label="Go to home"
+              style={{border:0,background:"transparent",padding:0,cursor:"pointer",textAlign:"left"}}
+            >
               <div style={{fontWeight:950,fontSize:30}}>{brandName}</div>
               <div className="muted" style={{fontSize:16}}>{settings.headerSubtitle}</div>
-            </div>
+            </button>
           )}
         </div>
 
@@ -481,6 +562,28 @@ export default function Home(){
       </div>
 
       <div className="card" style={{background:settings.cardColor}}>
+        {step!==7 && (
+          <div className="row" style={{justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+            <button
+              className="btn btn-soft"
+              onClick={goBack}
+              disabled={step===1}
+              style={{opacity:step===1?0.45:1}}
+            >
+              Back
+            </button>
+
+            <button
+              className="btn btn-primary"
+              onClick={goNext}
+              disabled={!canGoNext()}
+              style={{opacity:canGoNext()?1:0.45}}
+            >
+              Next
+            </button>
+          </div>
+        )}
+
         {step===1 && <>
           <h1>{settings.labels.paymentTitle}</h1><p className="muted">{settings.labels.paymentSubtitle}</p>
           <label>{settings.biomatrixLabel}</label><input value={biomatrixValue} readOnly/>
