@@ -433,92 +433,99 @@ export default function Admin(){
           {uploadFiltered.length}
         </div>
 
-        <div style={{overflowX:"auto",marginTop:12}}>
-          <table className="table" style={{width:"100%",tableLayout:"fixed",fontSize:12}}>
-            <thead><tr>
-              <th style={{width:"12%"}}>Case</th>
-              <th style={{width:"18%"}}>Staff Details</th>
-              <th style={{width:"10%"}}>Customer</th>
-              <th style={{width:"10%"}}>Date / Time</th>
-              <th style={{width:"8%"}}>Status</th>
-              <th style={{width:"9%"}}>Uploads</th>
-              <th style={{width:"12%"}}>Review Status</th>
-              <th style={{width:"13%"}}>Remark</th>
-              <th style={{width:"8%"}}>Actions</th>
-            </tr></thead>
-            <tbody>
-              {uploadPageRows.map(t=>{
-                const staff=staffForTransaction(t);
-                return <tr key={t.id}>
-                <td style={{wordBreak:"break-all",fontSize:12}}>{t.transaction_id}</td>
+        <div style={{marginTop:12,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(290px,1fr))",gap:12}}>
+          {uploadPageRows.map(t=>{
+            const staff=staffForTransaction(t);
+            const dt=formatUploadDateTime(t.created_at);
+            return <div key={t.id} style={{border:"1px solid #e1e7ef",borderRadius:16,padding:14,background:"#fff",minWidth:0}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",flexWrap:"wrap"}}>
+                <div style={{minWidth:0}}>
+                  <div className="muted" style={{fontSize:11}}>CASE</div>
+                  <div style={{fontWeight:900,wordBreak:"break-all"}}>{t.transaction_id}</div>
+                </div>
+                <div style={{fontSize:12,textAlign:"right"}}>
+                  <div>{dt.date}</div>
+                  <div className="muted">{dt.time}</div>
+                </div>
+              </div>
 
-                <td style={{fontSize:12,lineHeight:1.45}}>
-                  <div><b>{staff?.salesperson_name||t.salesperson_username||"-"}</b></div>
-                  <div className="muted">User ID: {t.salesperson_username||staff?.username||"-"}</div>
-                  <div className="muted">{t.salesperson_company||staff?.company_name||"-"}</div>
-                  <div className="muted" style={{wordBreak:"break-word"}}>{t.biomatrix_id||staff?.biomatrix_id||"-"}</div>
-                </td>
+              <div style={{marginTop:12,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div>
+                  <div className="muted" style={{fontSize:11}}>STAFF</div>
+                  <div style={{fontWeight:850,wordBreak:"break-word"}}>{staff?.salesperson_name||t.salesperson_username||"-"}</div>
+                  <div className="muted" style={{fontSize:12}}>User ID: {t.salesperson_username||staff?.username||"-"}</div>
+                  <div className="muted" style={{fontSize:12,wordBreak:"break-word"}}>{t.salesperson_company||staff?.company_name||"-"}</div>
+                  <div className="muted" style={{fontSize:12,wordBreak:"break-word"}}>{t.biomatrix_id||staff?.biomatrix_id||"-"}</div>
+                </div>
 
-                <td style={{fontSize:12,wordBreak:"break-word"}}>{t.name||"-"}</td>
+                <div>
+                  <div className="muted" style={{fontSize:11}}>CUSTOMER</div>
+                  <div style={{fontWeight:850,wordBreak:"break-word"}}>{t.name||"-"}</div>
+                  <div style={{marginTop:6}}><b>{uploadStatus(t)}</b></div>
+                </div>
+              </div>
 
-                <td style={{fontSize:12,lineHeight:1.45}}>
-                  <div>{formatUploadDateTime(t.created_at).date}</div>
-                  <div className="muted">{formatUploadDateTime(t.created_at).time}</div>
-                </td>
-
-                <td style={{fontSize:12}}><b>{uploadStatus(t)}</b></td>
-
-                <td style={{fontSize:12,lineHeight:1.55,whiteSpace:"nowrap"}}>
-                  <div>Front {t.id_front_data_url?"✅":"—"}</div>
-                  <div>Back {t.id_back_data_url?"✅":"—"}</div>
-                  <div>Selfie {t.selfie_data_url?"✅":"—"}</div>
-                </td>
-
-                <td>
-                  <select
-                    style={{width:"100%",minWidth:0,fontSize:12,padding:"8px 6px"}}
-                    value={t.upload_review_status||""}
-                    onChange={e=>setTxs(x=>x.map(v=>v.id===t.id?{...v,upload_review_status:e.target.value}:v))}
-                  >
-                    <option value="">Select</option>
-                    <option value="WAITING">Waiting</option>
-                    <option value="CONTACTED">Contacted</option>
-                    <option value="CHECKING">Checking</option>
-                    <option value="NEED_REUPLOAD">Need Re-upload</option>
-                    <option value="COMPLETED">Completed</option>
-                    <option value="CANCELLED">Cancelled</option>
-                  </select>
-                </td>
-
-                <td>
-                  <input
-                    style={{width:"100%",minWidth:0,fontSize:12,padding:"8px 6px"}}
-                    placeholder="Optional..."
-                    value={t.upload_remark||""}
-                    onChange={e=>setTxs(x=>x.map(v=>v.id===t.id?{...v,upload_remark:e.target.value}:v))}
-                  />
-                </td>
-
-                <td>
-                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                    <button
-                      className="btn btn-soft"
-                      style={{padding:"7px 8px",fontSize:12}}
-                      onClick={()=>{
-                        const cur=txs.find(v=>v.id===t.id) || t;
-                        saveUploadReview(t,cur.upload_review_status||"",cur.upload_remark||"");
-                      }}
-                    >
-                      Save
-                    </button>
-                    <button className="btn btn-primary" style={{padding:"7px 8px",fontSize:12}} onClick={()=>openUploadVerification(t)}>Verify</button>
-                    <button className="btn btn-soft" style={{padding:"7px 8px",fontSize:12}} onClick={()=>deleteUploadCase(t)}>Delete</button>
+              <div style={{marginTop:12,padding:10,borderRadius:12,background:"#f8fafc"}}>
+                <div className="muted" style={{fontSize:11,marginBottom:6}}>UPLOADS</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,textAlign:"center"}}>
+                  <div>
+                    <div style={{fontSize:12,fontWeight:800}}>Front</div>
+                    <div style={{fontSize:18}}>{t.id_front_data_url?"✅":"—"}</div>
                   </div>
-                </td>
-              </tr>
-              })}
-            </tbody>
-          </table>
+                  <div>
+                    <div style={{fontSize:12,fontWeight:800}}>Back</div>
+                    <div style={{fontSize:18}}>{t.id_back_data_url?"✅":"—"}</div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:12,fontWeight:800}}>Selfie</div>
+                    <div style={{fontSize:18}}>{t.selfie_data_url?"✅":"—"}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{marginTop:12}}>
+                <label>Review Status</label>
+                <select
+                  style={{width:"100%"}}
+                  value={t.upload_review_status||""}
+                  onChange={e=>setTxs(x=>x.map(v=>v.id===t.id?{...v,upload_review_status:e.target.value}:v))}
+                >
+                  <option value="">Select</option>
+                  <option value="WAITING">Waiting</option>
+                  <option value="CONTACTED">Contacted</option>
+                  <option value="CHECKING">Checking</option>
+                  <option value="NEED_REUPLOAD">Need Re-upload</option>
+                  <option value="COMPLETED">Completed</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </select>
+              </div>
+
+              <div style={{marginTop:10}}>
+                <label>Remark (optional)</label>
+                <input
+                  style={{width:"100%"}}
+                  placeholder="Optional..."
+                  value={t.upload_remark||""}
+                  onChange={e=>setTxs(x=>x.map(v=>v.id===t.id?{...v,upload_remark:e.target.value}:v))}
+                />
+              </div>
+
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:12}}>
+                <button
+                  className="btn btn-soft"
+                  style={{padding:"9px 8px"}}
+                  onClick={()=>{
+                    const cur=txs.find(v=>v.id===t.id) || t;
+                    saveUploadReview(t,cur.upload_review_status||"",cur.upload_remark||"");
+                  }}
+                >
+                  Save
+                </button>
+                <button className="btn btn-primary" style={{padding:"9px 8px"}} onClick={()=>openUploadVerification(t)}>Verify</button>
+                <button className="btn btn-soft" style={{padding:"9px 8px"}} onClick={()=>deleteUploadCase(t)}>Delete</button>
+              </div>
+            </div>
+          })}
         </div>
 
         <div className="row" style={{justifyContent:"space-between",alignItems:"center",marginTop:16,flexWrap:"wrap"}}>
