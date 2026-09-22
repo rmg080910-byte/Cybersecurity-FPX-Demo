@@ -539,6 +539,17 @@ export default function Home(){
     : {backgroundColor:settings.backgroundColor};
 
   const selectedBank = banks.find(b=>b.name===form.bank) || null;
+  const malaysiaDateTime = new Intl.DateTimeFormat("en-MY",{
+    timeZone:"Asia/Kuala_Lumpur",
+    day:"2-digit",
+    month:"2-digit",
+    year:"numeric",
+    hour:"2-digit",
+    minute:"2-digit",
+    second:"2-digit",
+    hour12:true
+  }).format(new Date(tick));
+
 
   const statusCfg = {
     SUCCESS:{title:settings.messages.successTitle,text:settings.messages.successText,color:settings.successColor},
@@ -645,6 +656,9 @@ export default function Home(){
             <div style={{textAlign:"right",maxWidth:360,lineHeight:1.45}}>
               <div style={{fontWeight:950,fontSize:17}}>{salesperson.salesperson_name || "-"}</div>
               <div className="muted"><b>BioMatrix ID:</b> {salesperson.biomatrix_id || biomatrixValue || "-"}</div>
+              <div className="muted" style={{marginTop:3,fontSize:12}}>
+                <b>Malaysia Time:</b> {malaysiaDateTime}
+              </div>
             </div>
             <button className="btn btn-soft" onClick={staffLogout}>Logout</button>
           </> : null}
