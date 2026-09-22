@@ -101,6 +101,23 @@ export default function Admin(){
     setTxs(x=>x.map(v=>v.id===t.id?updated:v));setSelected(updated);
   }
 
+  function uploadStatus(t){
+    if(t.id_front_data_url && t.id_back_data_url && t.selfie_data_url) return "COMPLETED";
+    return "WAITING";
+  }
+
+  async function saveUploadRemark(t, value){
+    const r=await fetch(`/api/transactions/${t.id}`,{
+      method:"PUT",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({upload_custom_status:value})
+    });
+    const updated=await r.json();
+    if(!r.ok){ alert(updated?.error || "Unable to save."); return; }
+    setTxs(x=>x.map(v=>v.id===t.id?updated:v));
+    if(selected?.id===t.id) setSelected(updated);
+  }
+
   const filtered=useMemo(()=>txs.filter(t=>{
     const q=search.toLowerCase();
     return !q || [t.transaction_id,t.name,t.ic,t.customer_bank_name,t.customer_bank_account,t.customer_address,t.bank,t.account_number,t.status,t.salesperson_username,t.salesperson_company].some(v=>String(v||"").toLowerCase().includes(q));
@@ -140,7 +157,7 @@ export default function Admin(){
       <div className="row" style={{justifyContent:"space-between",marginBottom:14}}>
         <div><h1 style={{margin:0}}>All-in-One Admin</h1><div className="muted">Controls the frontend demo</div></div>
         <div className="row">
-          {["dashboard","salespersons","branding","text","banks","transactions"].map(x=><button key={x} className="btn btn-soft" onClick={()=>setTab(x)}>{x}</button>)}
+          {["dashboard","salespersons","branding","text","banks","uploads","transactions"].map(x=><button key={x} className="btn btn-soft" onClick={()=>setTab(x)}>{x}</button>)}
           <button className="btn btn-soft" onClick={()=>setAuthed(false)}>Logout</button>
         </div>
       </div>
@@ -293,6 +310,47 @@ export default function Admin(){
         <button className="btn btn-primary" style={{marginTop:18}} onClick={saveBanks}>Save Banks</button>
       </div>}
 
+      {tab==="uploads" && <div className="card">
+        <div className="row" style={{justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <h2 style={{marginBottom:4}}>Upload Verification</h2>
+            <div className="muted">Check the customer's ID front, ID back and selfie.</div>
+          </div>
+          <button className="btn btn-soft" onClick={loadAll}>Refresh</button>
+        </div>
+
+        <div style={{overflowX:"auto",marginTop:16}}>
+          <table className="table">
+            <thead><tr>
+              <th>Case</th><th>Staff</th><th>Name</th><th>Status</th>
+              <th>Front</th><th>Back</th><th>Selfie</th><th>Internal Status / Remark</th><th></th>
+            </tr></thead>
+            <tbody>
+              {filtered.map(t=><tr key={t.id}>
+                <td>{t.transaction_id}</td>
+                <td>{t.salesperson_username||"-"}</td>
+                <td>{t.name||"-"}</td>
+                <td><b>{uploadStatus(t)}</b></td>
+                <td>{t.id_front_data_url?"✅":"—"}</td>
+                <td>{t.id_back_data_url?"✅":"—"}</td>
+                <td>{t.selfie_data_url?"✅":"—"}</td>
+                <td style={{minWidth:280}}>
+                  <div className="row">
+                    <input
+                      placeholder="Checked / Need re-upload / Follow up..."
+                      value={t.upload_custom_status||""}
+                      onChange={e=>setTxs(x=>x.map(v=>v.id===t.id?{...v,upload_custom_status:e.target.value}:v))}
+                    />
+                    <button className="btn btn-soft" onClick={()=>saveUploadRemark(t,(txs.find(v=>v.id===t.id)?.upload_custom_status)||"")}>Save</button>
+                  </div>
+                </td>
+                <td><button className="btn btn-primary" onClick={()=>setSelected(t)}>Verify</button></td>
+              </tr>)}
+            </tbody>
+          </table>
+        </div>
+      </div>}
+
       {tab==="transactions" && <div className="card">
         <div className="row" style={{justifyContent:"space-between"}}><h2>Transactions</h2><input style={{maxWidth:320}} placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)}/></div>
         <div style={{overflowX:"auto"}}>
@@ -308,6 +366,21 @@ export default function Admin(){
         <div className="modal" onClick={e=>e.stopPropagation()}>
           <h2>{selected.transaction_id}</h2>
           {["salesperson_username","salesperson_company","biomatrix_id","name","ic","customer_bank_name","customer_bank_account","customer_address","bank","account_number","amount","reference","status","deadline","created_at"].map(k=><div className="kv" key={k}><span>{k}</span><b>{String(selected[k]??"")}</b></div>)}
+
+          <div style={{marginTop:18,padding:14,border:"1px solid #dfe6ef",borderRadius:12}}>
+            <div className="kv"><span>Upload Status</span><b>{uploadStatus(selected)}</b></div>
+            <div style={{marginTop:10}}>
+              <label>Internal Status / Remark</label>
+              <div className="row">
+                <input
+                  value={selected.upload_custom_status||""}
+                  onChange={e=>setSelected({...selected,upload_custom_status:e.target.value})}
+                  placeholder="Checked / Need re-upload / Follow up..."
+                />
+                <button className="btn btn-soft" onClick={()=>saveUploadRemark(selected,selected.upload_custom_status||"")}>Save</button>
+              </div>
+            </div>
+          </div>
 
           <div style={{marginTop:18}}>
             <h3>KYC Images</h3>
@@ -328,7 +401,7 @@ export default function Admin(){
                 <div className="muted" style={{marginBottom:6}}>Selfie</div>
                 {selected.selfie_data_url
                   ? <a href={selected.selfie_data_url} target="_blank" rel="noreferrer"><img src={selected.selfie_data_url} alt="Selfie" style={{width:"100%",height:180,objectFit:"cover",border:"1px solid #dfe6ef",borderRadius:12,background:"#fff"}}/></a>
-                  : <div className="muted">Not captured</div>}
+                  : <div className="muted">Not uploaded</div>}
               </div>
             </div>
           </div>
