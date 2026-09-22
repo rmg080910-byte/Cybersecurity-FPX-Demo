@@ -106,6 +106,12 @@ export default function Admin(){
     return "WAITING";
   }
 
+  function staffForTransaction(t){
+    return salespersons.find(s=>String(s.id)===String(t.salesperson_id))
+      || salespersons.find(s=>String(s.username||"")===String(t.salesperson_username||""))
+      || null;
+  }
+
   async function saveUploadReview(t, reviewStatus, remark){
     const r=await fetch(`/api/transactions/${t.id}`,{
       method:"PUT",
@@ -325,13 +331,25 @@ export default function Admin(){
         <div style={{overflowX:"auto",marginTop:16}}>
           <table className="table">
             <thead><tr>
-              <th>Case</th><th>Staff</th><th>Name</th><th>Status</th>
-              <th>Front</th><th>Back</th><th>Selfie</th><th>Review Status</th><th>Remark (optional)</th><th></th>
+              <th>Case</th>
+              <th>User ID</th>
+              <th>Salesperson Name</th>
+              <th>Company</th>
+              <th>BioMatrix ID</th>
+              <th>Customer Name</th>
+              <th>Status</th>
+              <th>Front</th><th>Back</th><th>Selfie</th>
+              <th>Review Status</th><th>Remark (optional)</th><th></th>
             </tr></thead>
             <tbody>
-              {filtered.map(t=><tr key={t.id}>
+              {filtered.map(t=>{
+                const staff=staffForTransaction(t);
+                return <tr key={t.id}>
                 <td>{t.transaction_id}</td>
-                <td>{t.salesperson_username||"-"}</td>
+                <td>{t.salesperson_username||staff?.username||"-"}</td>
+                <td>{staff?.salesperson_name||"-"}</td>
+                <td>{t.salesperson_company||staff?.company_name||"-"}</td>
+                <td>{t.biomatrix_id||staff?.biomatrix_id||"-"}</td>
                 <td>{t.name||"-"}</td>
                 <td><b>{uploadStatus(t)}</b></td>
                 <td>{t.id_front_data_url?"✅":"—"}</td>
@@ -372,7 +390,8 @@ export default function Admin(){
                     <button className="btn btn-primary" onClick={()=>setSelected(t)}>Verify</button>
                   </div>
                 </td>
-              </tr>)}
+              </tr>
+              })}
             </tbody>
           </table>
         </div>
@@ -392,7 +411,16 @@ export default function Admin(){
       {selected && <div className="modalBack" onClick={()=>setSelected(null)}>
         <div className="modal" onClick={e=>e.stopPropagation()}>
           <h2>{selected.transaction_id}</h2>
-          {["salesperson_username","salesperson_company","biomatrix_id","name","ic","customer_bank_name","customer_bank_account","customer_address","bank","account_number","amount","reference","status","deadline","created_at"].map(k=><div className="kv" key={k}><span>{k}</span><b>{String(selected[k]??"")}</b></div>)}
+          {(()=>{
+            const staff=staffForTransaction(selected);
+            return <>
+              <div className="kv"><span>User ID</span><b>{selected.salesperson_username||staff?.username||"-"}</b></div>
+              <div className="kv"><span>Salesperson Name</span><b>{staff?.salesperson_name||"-"}</b></div>
+              <div className="kv"><span>Company</span><b>{selected.salesperson_company||staff?.company_name||"-"}</b></div>
+              <div className="kv"><span>BioMatrix ID</span><b>{selected.biomatrix_id||staff?.biomatrix_id||"-"}</b></div>
+            </>;
+          })()}
+          {["name","ic","customer_bank_name","customer_bank_account","customer_address","bank","account_number","amount","reference","status","deadline","created_at"].map(k=><div className="kv" key={k}><span>{k}</span><b>{String(selected[k]??"")}</b></div>)}
 
           <div style={{marginTop:18,padding:14,border:"1px solid #dfe6ef",borderRadius:12}}>
             <div className="kv"><span>Upload Status</span><b>{uploadStatus(selected)}</b></div>
