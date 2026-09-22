@@ -24,6 +24,10 @@ export default function Admin(){
   const [tab,setTab]=useState("dashboard");
   const [selected,setSelected]=useState(null);
   const [savingStaffId,setSavingStaffId]=useState(null);
+  const [uploadPageSize,setUploadPageSize]=useState(10);
+  const [uploadPage,setUploadPage]=useState(1);
+  const [uploadDate,setUploadDate]=useState("");
+  const [uploadSearch,setUploadSearch]=useState("");
 
   async function loadAll(){
     await fetch("/api/init",{method:"POST"});
@@ -127,10 +131,64 @@ export default function Admin(){
     if(selected?.id===t.id) setSelected(updated);
   }
 
+  async function deleteUploadCase(t){
+    if(!confirm(`Delete case ${t.transaction_id}?`)) return;
+    const r=await fetch(`/api/transactions/${t.id}`,{method:"DELETE"});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok){ alert(data?.error || "Unable to delete case."); return; }
+    setTxs(x=>x.filter(v=>v.id!==t.id));
+    if(selected?.id===t.id) setSelected(null);
+  }
+
+  async function openUploadVerification(t){
+    try{
+      const r=await fetch(`/api/transactions/${t.id}`,{cache:"no-store"});
+      const latest=await r.json();
+      if(!r.ok || !latest) throw new Error(latest?.error || "Unable to load case.");
+      setTxs(x=>x.map(v=>v.id===t.id?latest:v));
+      setSelected(latest);
+    }catch(e){
+      alert(e.message || "Unable to load case.");
+    }
+  }
+
   const filtered=useMemo(()=>txs.filter(t=>{
     const q=search.toLowerCase();
     return !q || [t.transaction_id,t.name,t.ic,t.customer_bank_name,t.customer_bank_account,t.customer_address,t.bank,t.account_number,t.status,t.salesperson_username,t.salesperson_company].some(v=>String(v||"").toLowerCase().includes(q));
   }),[txs,search]);
+
+  const uploadFiltered=useMemo(()=>{
+    const q=uploadSearch.trim().toLowerCase();
+    return [...txs]
+      .filter(t=>{
+        const matchesSearch=!q || [
+          t.transaction_id,t.name,t.ic,t.salesperson_username,t.salesperson_company,
+          t.customer_bank_name,t.customer_bank_account,t.upload_review_status,t.upload_remark
+        ].some(v=>String(v||"").toLowerCase().includes(q));
+
+        const d=t.created_at ? new Date(t.created_at) : null;
+        const localDate=d && !Number.isNaN(d.getTime())
+          ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`
+          : "";
+
+        return matchesSearch && (!uploadDate || localDate===uploadDate);
+      })
+      .sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
+  },[txs,uploadSearch,uploadDate]);
+
+  const uploadTotalPages=Math.max(1,Math.ceil(uploadFiltered.length/uploadPageSize));
+  const safeUploadPage=Math.min(uploadPage,uploadTotalPages);
+  const uploadPageRows=uploadFiltered.slice((safeUploadPage-1)*uploadPageSize,safeUploadPage*uploadPageSize);
+
+  function formatUploadDateTime(value){
+    if(!value) return {date:"-",time:"-"};
+    const d=new Date(value);
+    if(Number.isNaN(d.getTime())) return {date:"-",time:"-"};
+    return {
+      date:d.toLocaleDateString("en-GB"),
+      time:d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",second:"2-digit"})
+    };
+  }
 
   if(!authed) return <main className="page" style={{background:"#eef1eb"}}>
     <div className="shell" style={{maxWidth:460}}>
@@ -320,7 +378,7 @@ export default function Admin(){
       </div>}
 
       {tab==="uploads" && <div className="card">
-        <div className="row" style={{justifyContent:"space-between",alignItems:"center"}}>
+        <div className="row" style={{justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
           <div>
             <h2 style={{marginBottom:4}}>Upload Verification</h2>
             <div className="muted">Check the customer's ID front, ID back and selfie.</div>
@@ -328,35 +386,97 @@ export default function Admin(){
           <button className="btn btn-soft" onClick={loadAll}>Refresh</button>
         </div>
 
-        <div style={{overflowX:"auto",marginTop:16}}>
-          <table className="table">
+        <div className="row" style={{marginTop:16,gap:10,flexWrap:"wrap",alignItems:"end"}}>
+          <div style={{minWidth:240,flex:"1 1 260px"}}>
+            <label>Search</label>
+            <input
+              placeholder="Case / staff / customer / IC / bank..."
+              value={uploadSearch}
+              onChange={e=>{setUploadSearch(e.target.value);setUploadPage(1);}}
+            />
+          </div>
+
+          <div style={{minWidth:170}}>
+            <label>Date</label>
+            <input
+              type="date"
+              value={uploadDate}
+              onChange={e=>{setUploadDate(e.target.value);setUploadPage(1);}}
+            />
+          </div>
+
+          <div style={{minWidth:130}}>
+            <label>Show</label>
+            <select
+              value={uploadPageSize}
+              onChange={e=>{setUploadPageSize(Number(e.target.value));setUploadPage(1);}}
+            >
+              <option value={10}>10</option>
+              <option value={30}>30</option>
+              <option value={60}>60</option>
+              <option value={100}>100</option>
+            </select>
+          </div>
+
+          {(uploadDate || uploadSearch) && (
+            <button className="btn btn-soft" onClick={()=>{setUploadDate("");setUploadSearch("");setUploadPage(1);}}>
+              Clear
+            </button>
+          )}
+        </div>
+
+        <div className="muted" style={{marginTop:10}}>
+          Showing {uploadFiltered.length===0?0:(safeUploadPage-1)*uploadPageSize+1}
+          {" - "}
+          {Math.min(safeUploadPage*uploadPageSize,uploadFiltered.length)}
+          {" of "}
+          {uploadFiltered.length}
+        </div>
+
+        <div style={{overflowX:"auto",marginTop:12}}>
+          <table className="table" style={{width:"100%",tableLayout:"fixed",fontSize:12}}>
             <thead><tr>
-              <th>Case</th>
-              <th>User ID</th>
-              <th>Salesperson Name</th>
-              <th>Company</th>
-              <th>BioMatrix ID</th>
-              <th>Customer Name</th>
-              <th>Status</th>
-              <th>Front</th><th>Back</th><th>Selfie</th>
-              <th>Review Status</th><th>Remark (optional)</th><th></th>
+              <th style={{width:"12%"}}>Case</th>
+              <th style={{width:"18%"}}>Staff Details</th>
+              <th style={{width:"10%"}}>Customer</th>
+              <th style={{width:"10%"}}>Date / Time</th>
+              <th style={{width:"8%"}}>Status</th>
+              <th style={{width:"9%"}}>Uploads</th>
+              <th style={{width:"12%"}}>Review Status</th>
+              <th style={{width:"13%"}}>Remark</th>
+              <th style={{width:"8%"}}>Actions</th>
             </tr></thead>
             <tbody>
-              {filtered.map(t=>{
+              {uploadPageRows.map(t=>{
                 const staff=staffForTransaction(t);
                 return <tr key={t.id}>
-                <td>{t.transaction_id}</td>
-                <td>{t.salesperson_username||staff?.username||"-"}</td>
-                <td>{staff?.salesperson_name||"-"}</td>
-                <td>{t.salesperson_company||staff?.company_name||"-"}</td>
-                <td>{t.biomatrix_id||staff?.biomatrix_id||"-"}</td>
-                <td>{t.name||"-"}</td>
-                <td><b>{uploadStatus(t)}</b></td>
-                <td>{t.id_front_data_url?"✅":"—"}</td>
-                <td>{t.id_back_data_url?"✅":"—"}</td>
-                <td>{t.selfie_data_url?"✅":"—"}</td>
-                <td style={{minWidth:180}}>
+                <td style={{wordBreak:"break-all",fontSize:12}}>{t.transaction_id}</td>
+
+                <td style={{fontSize:12,lineHeight:1.45}}>
+                  <div><b>{staff?.salesperson_name||t.salesperson_username||"-"}</b></div>
+                  <div className="muted">User ID: {t.salesperson_username||staff?.username||"-"}</div>
+                  <div className="muted">{t.salesperson_company||staff?.company_name||"-"}</div>
+                  <div className="muted" style={{wordBreak:"break-word"}}>{t.biomatrix_id||staff?.biomatrix_id||"-"}</div>
+                </td>
+
+                <td style={{fontSize:12,wordBreak:"break-word"}}>{t.name||"-"}</td>
+
+                <td style={{fontSize:12,lineHeight:1.45}}>
+                  <div>{formatUploadDateTime(t.created_at).date}</div>
+                  <div className="muted">{formatUploadDateTime(t.created_at).time}</div>
+                </td>
+
+                <td style={{fontSize:12}}><b>{uploadStatus(t)}</b></td>
+
+                <td style={{fontSize:12,lineHeight:1.55,whiteSpace:"nowrap"}}>
+                  <div>Front {t.id_front_data_url?"✅":"—"}</div>
+                  <div>Back {t.id_back_data_url?"✅":"—"}</div>
+                  <div>Selfie {t.selfie_data_url?"✅":"—"}</div>
+                </td>
+
+                <td>
                   <select
+                    style={{width:"100%",minWidth:0,fontSize:12,padding:"8px 6px"}}
                     value={t.upload_review_status||""}
                     onChange={e=>setTxs(x=>x.map(v=>v.id===t.id?{...v,upload_review_status:e.target.value}:v))}
                   >
@@ -369,17 +489,21 @@ export default function Admin(){
                     <option value="CANCELLED">Cancelled</option>
                   </select>
                 </td>
-                <td style={{minWidth:260}}>
+
+                <td>
                   <input
-                    placeholder="Optional remark..."
+                    style={{width:"100%",minWidth:0,fontSize:12,padding:"8px 6px"}}
+                    placeholder="Optional..."
                     value={t.upload_remark||""}
                     onChange={e=>setTxs(x=>x.map(v=>v.id===t.id?{...v,upload_remark:e.target.value}:v))}
                   />
                 </td>
+
                 <td>
-                  <div className="row">
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
                     <button
                       className="btn btn-soft"
+                      style={{padding:"7px 8px",fontSize:12}}
                       onClick={()=>{
                         const cur=txs.find(v=>v.id===t.id) || t;
                         saveUploadReview(t,cur.upload_review_status||"",cur.upload_remark||"");
@@ -387,13 +511,34 @@ export default function Admin(){
                     >
                       Save
                     </button>
-                    <button className="btn btn-primary" onClick={()=>setSelected(t)}>Verify</button>
+                    <button className="btn btn-primary" style={{padding:"7px 8px",fontSize:12}} onClick={()=>openUploadVerification(t)}>Verify</button>
+                    <button className="btn btn-soft" style={{padding:"7px 8px",fontSize:12}} onClick={()=>deleteUploadCase(t)}>Delete</button>
                   </div>
                 </td>
               </tr>
               })}
             </tbody>
           </table>
+        </div>
+
+        <div className="row" style={{justifyContent:"space-between",alignItems:"center",marginTop:16,flexWrap:"wrap"}}>
+          <div className="muted">Page {safeUploadPage} / {uploadTotalPages}</div>
+          <div className="row">
+            <button
+              className="btn btn-soft"
+              disabled={safeUploadPage<=1}
+              onClick={()=>setUploadPage(p=>Math.max(1,p-1))}
+            >
+              Previous
+            </button>
+            <button
+              className="btn btn-soft"
+              disabled={safeUploadPage>=uploadTotalPages}
+              onClick={()=>setUploadPage(p=>Math.min(uploadTotalPages,p+1))}
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>}
 
