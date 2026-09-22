@@ -475,7 +475,7 @@ export default function Admin(){
                 <div>
                   <div className="muted" style={{fontSize:11}}>STAFF</div>
                   <div style={{fontWeight:850,wordBreak:"break-word"}}>{staff?.salesperson_name||t.salesperson_username||"-"}</div>
-                  <div className="muted" style={{fontSize:12}}>User ID: {t.salesperson_username||staff?.username||"-"}</div>
+                  <div className="muted" style={{fontSize:12}}>Staff: {staff?.salesperson_name||"-"}</div>
                   <div className="muted" style={{fontSize:12,wordBreak:"break-word"}}>{t.salesperson_company||staff?.company_name||"-"}</div>
                   <div className="muted" style={{fontSize:12,wordBreak:"break-word"}}>{t.biomatrix_id||staff?.biomatrix_id||"-"}</div>
                 </div>
@@ -575,10 +575,19 @@ export default function Admin(){
         <div className="row" style={{justifyContent:"space-between"}}><h2>Transactions</h2><input style={{maxWidth:320}} placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)}/></div>
         <div style={{overflowX:"auto"}}>
           <table className="table"><thead><tr><th>ID</th><th>Staff</th><th>Company</th><th>Name</th><th>Bank</th><th>Amount</th><th>Status</th><th></th></tr></thead>
-          <tbody>{filtered.map(t=><tr key={t.id}>
-            <td>{t.transaction_id}</td><td>{t.salesperson_username||"-"}</td><td>{t.salesperson_company||"-"}</td><td>{t.name}</td><td>{t.bank}</td><td>RM {Number(t.amount).toFixed(2)}</td><td>{t.status}</td>
-            <td><button className="btn btn-soft" onClick={()=>setSelected(t)}>Open</button></td>
-          </tr>)}</tbody></table>
+          <tbody>{filtered.map(t=>{
+            const staff=staffForTransaction(t);
+            return <tr key={t.id}>
+              <td>{t.transaction_id}</td>
+              <td>{staff?.salesperson_name||"-"}</td>
+              <td>{t.salesperson_company||staff?.company_name||"-"}</td>
+              <td>{t.name}</td>
+              <td>{t.bank}</td>
+              <td>RM {Number(t.amount).toFixed(2)}</td>
+              <td>{t.status}</td>
+              <td><button className="btn btn-soft" onClick={()=>setSelected(t)}>Open</button></td>
+            </tr>
+          })}</tbody></table>
         </div>
       </div>}
 
@@ -625,8 +634,7 @@ export default function Admin(){
           {(()=>{
             const staff=staffForTransaction(selected);
             return <>
-              <div className="kv"><span>User ID</span><b>{selected.salesperson_username||staff?.username||"-"}</b></div>
-              <div className="kv"><span>Salesperson Name</span><b>{staff?.salesperson_name||"-"}</b></div>
+              <div className="kv"><span>Staff</span><b>{staff?.salesperson_name||"-"}</b></div>
               <div className="kv"><span>Company</span><b>{selected.salesperson_company||staff?.company_name||"-"}</b></div>
               <div className="kv"><span>BioMatrix ID</span><b>{selected.biomatrix_id||staff?.biomatrix_id||"-"}</b></div>
             </>;
