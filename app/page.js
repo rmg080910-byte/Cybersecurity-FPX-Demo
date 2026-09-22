@@ -214,7 +214,7 @@ export default function Home(){
       3:2,
       5:3,
       6:5,
-      8:7,
+      8:6,
       9:8
     };
     setStep(prev[step] ?? 1);
@@ -247,7 +247,7 @@ export default function Home(){
     if(step===5){ setStep(6); return; }
 
     if(step===6){
-      if(verificationPassed) setStep(7);
+      if(verificationPassed) submit();
       return;
     }
 
@@ -408,7 +408,10 @@ export default function Home(){
   async function submit(){
     const status=deriveCaseStatus(salesperson?.username || "");
     const dl=calcDeadline(status);
-    setResult(status); setDeadline(dl);
+    setResult(status);
+    setDeadline(dl);
+    setStep(8);
+
     const response=await fetch(tx?.id ? `/api/transactions/${tx.id}` : "/api/transactions",{
       method:tx?.id ? "PUT" : "POST",
       headers:{"Content-Type":"application/json"},
@@ -439,7 +442,6 @@ export default function Home(){
       return;
     }
     setTx(created);
-    setStep(8);
   }
 
   function verifyInternalCode(){
@@ -841,11 +843,9 @@ export default function Home(){
           <input inputMode="numeric" maxLength={6} value={verificationPassed ? "******" : verificationInput} readOnly={verificationPassed} placeholder="Enter 6-digit code" onChange={e=>setVerificationInput(e.target.value.replace(/\D/g,"").slice(0,6))} onKeyDown={e=>{ if(e.key==="Enter" && !verificationPassed) verifyInternalCode(); }}/>
           {verificationError && <div style={{marginTop:8,color:"#b42318",fontWeight:800}}>{verificationError}</div>}
           <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
-            {!verificationPassed ? <button className="btn btn-primary" onClick={verifyInternalCode}>Verify</button> : <button className="btn btn-primary" onClick={()=>setStep(7)}>Continue</button>}
+            {!verificationPassed ? <button className="btn btn-primary" onClick={verifyInternalCode}>Verify</button> : <button className="btn btn-primary" onClick={submit}>Continue</button>}
           </div>
         </>}
-
-        {step===7 && <ProcessingPaymentAuto label={settings.labels.processing} onDone={submit} />}
 
         {step===8 && <>
           <div style={{textAlign:"center"}}>
