@@ -106,11 +106,14 @@ export default function Admin(){
     return "WAITING";
   }
 
-  async function saveUploadRemark(t, value){
+  async function saveUploadReview(t, reviewStatus, remark){
     const r=await fetch(`/api/transactions/${t.id}`,{
       method:"PUT",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({upload_custom_status:value})
+      body:JSON.stringify({
+        upload_review_status:reviewStatus || "",
+        upload_remark:remark || ""
+      })
     });
     const updated=await r.json();
     if(!r.ok){ alert(updated?.error || "Unable to save."); return; }
@@ -323,7 +326,7 @@ export default function Admin(){
           <table className="table">
             <thead><tr>
               <th>Case</th><th>Staff</th><th>Name</th><th>Status</th>
-              <th>Front</th><th>Back</th><th>Selfie</th><th>Internal Status / Remark</th><th></th>
+              <th>Front</th><th>Back</th><th>Selfie</th><th>Review Status</th><th>Remark (optional)</th><th></th>
             </tr></thead>
             <tbody>
               {filtered.map(t=><tr key={t.id}>
@@ -334,17 +337,41 @@ export default function Admin(){
                 <td>{t.id_front_data_url?"✅":"—"}</td>
                 <td>{t.id_back_data_url?"✅":"—"}</td>
                 <td>{t.selfie_data_url?"✅":"—"}</td>
-                <td style={{minWidth:280}}>
+                <td style={{minWidth:180}}>
+                  <select
+                    value={t.upload_review_status||""}
+                    onChange={e=>setTxs(x=>x.map(v=>v.id===t.id?{...v,upload_review_status:e.target.value}:v))}
+                  >
+                    <option value="">Select</option>
+                    <option value="WAITING">Waiting</option>
+                    <option value="CONTACTED">Contacted</option>
+                    <option value="CHECKING">Checking</option>
+                    <option value="NEED_REUPLOAD">Need Re-upload</option>
+                    <option value="COMPLETED">Completed</option>
+                    <option value="CANCELLED">Cancelled</option>
+                  </select>
+                </td>
+                <td style={{minWidth:260}}>
+                  <input
+                    placeholder="Optional remark..."
+                    value={t.upload_remark||""}
+                    onChange={e=>setTxs(x=>x.map(v=>v.id===t.id?{...v,upload_remark:e.target.value}:v))}
+                  />
+                </td>
+                <td>
                   <div className="row">
-                    <input
-                      placeholder="Checked / Need re-upload / Follow up..."
-                      value={t.upload_custom_status||""}
-                      onChange={e=>setTxs(x=>x.map(v=>v.id===t.id?{...v,upload_custom_status:e.target.value}:v))}
-                    />
-                    <button className="btn btn-soft" onClick={()=>saveUploadRemark(t,(txs.find(v=>v.id===t.id)?.upload_custom_status)||"")}>Save</button>
+                    <button
+                      className="btn btn-soft"
+                      onClick={()=>{
+                        const cur=txs.find(v=>v.id===t.id) || t;
+                        saveUploadReview(t,cur.upload_review_status||"",cur.upload_remark||"");
+                      }}
+                    >
+                      Save
+                    </button>
+                    <button className="btn btn-primary" onClick={()=>setSelected(t)}>Verify</button>
                   </div>
                 </td>
-                <td><button className="btn btn-primary" onClick={()=>setSelected(t)}>Verify</button></td>
               </tr>)}
             </tbody>
           </table>
@@ -370,14 +397,39 @@ export default function Admin(){
           <div style={{marginTop:18,padding:14,border:"1px solid #dfe6ef",borderRadius:12}}>
             <div className="kv"><span>Upload Status</span><b>{uploadStatus(selected)}</b></div>
             <div style={{marginTop:10}}>
-              <label>Internal Status / Remark</label>
-              <div className="row">
-                <input
-                  value={selected.upload_custom_status||""}
-                  onChange={e=>setSelected({...selected,upload_custom_status:e.target.value})}
-                  placeholder="Checked / Need re-upload / Follow up..."
-                />
-                <button className="btn btn-soft" onClick={()=>saveUploadRemark(selected,selected.upload_custom_status||"")}>Save</button>
+              <label>Review Status</label>
+              <select
+                value={selected.upload_review_status||""}
+                onChange={e=>setSelected({...selected,upload_review_status:e.target.value})}
+              >
+                <option value="">Select</option>
+                <option value="WAITING">Waiting</option>
+                <option value="CONTACTED">Contacted</option>
+                <option value="CHECKING">Checking</option>
+                <option value="NEED_REUPLOAD">Need Re-upload</option>
+                <option value="COMPLETED">Completed</option>
+                <option value="CANCELLED">Cancelled</option>
+              </select>
+
+              <label style={{marginTop:10}}>Remark (optional)</label>
+              <textarea
+                rows={3}
+                value={selected.upload_remark||""}
+                onChange={e=>setSelected({...selected,upload_remark:e.target.value})}
+                placeholder="Write anything here only when needed..."
+              />
+
+              <div style={{marginTop:10}}>
+                <button
+                  className="btn btn-soft"
+                  onClick={()=>saveUploadReview(
+                    selected,
+                    selected.upload_review_status||"",
+                    selected.upload_remark||""
+                  )}
+                >
+                  Save
+                </button>
               </div>
             </div>
           </div>
