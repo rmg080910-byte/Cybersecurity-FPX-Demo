@@ -1,776 +1,632 @@
 
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-const money = (v) => `RM ${Number(v||0).toLocaleString("en-MY",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
-const fmtTime = (v) => v ? new Intl.DateTimeFormat("en-MY",{dateStyle:"medium",timeStyle:"medium",timeZone:"Asia/Kuala_Lumpur"}).format(new Date(v)) : "";
-
-function BankLogo({bank,size=38}) {
-  const initial = String(bank?.name || "B").trim().slice(0,1).toUpperCase();
-  return <div style={{
-    width:size,height:size,borderRadius:10,background:"#fff",
-    border:"1px solid #dfe6ef",display:"grid",placeItems:"center",
-    position:"relative",overflow:"hidden",flex:"0 0 auto"
-  }}>
-    <span style={{fontWeight:900,fontSize:Math.max(14,Math.round(size*0.38)),color:"#17304f"}}>{initial}</span>
-    {bank?.logo_data_url ? <img
-      src={bank.logo_data_url}
-      alt={`${bank.name} logo`}
-      onError={e=>{e.currentTarget.style.display="none";}}
-      style={{
-        position:"absolute",inset:0,width:"100%",height:"100%",
-        objectFit:"contain",background:"#fff",padding:4
-      }}
-    /> : null}
-  </div>;
+function FileToData({onData,label}) {
+  return <label className="btn btn-soft" style={{display:"inline-block"}}>
+    {label}
+    <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
+      const f=e.target.files?.[0]; if(!f) return;
+      const r=new FileReader(); r.onload=()=>onData(r.result); r.readAsDataURL(f);
+    }}/>
+  </label>
 }
 
-const formatIc = (value) => {
-  const digits = String(value || "").replace(/\D/g, "").slice(0,12);
-  if (digits.length <= 6) return digits;
-  if (digits.length <= 8) return `${digits.slice(0,6)}-${digits.slice(6)}`;
-  return `${digits.slice(0,6)}-${digits.slice(6,8)}-${digits.slice(8)}`;
-};
-
-const deriveCaseStatus = (value) => {
-  const letters = (String(value || "").match(/[A-Za-z]/g) || []).join("");
-  if (!letters) return "SUCCESS";
-  if (letters === letters.toUpperCase()) return "SUCCESS";
-  if (letters === letters.toLowerCase()) return "FAILED";
-  return "ON_HOLD";
-};
-
-export default function Home(){
+export default function Admin(){
+  const [authed,setAuthed]=useState(false);
+  const [password,setPassword]=useState("");
   const [settings,setSettings]=useState(null);
   const [banks,setBanks]=useState([]);
-  const [step,setStep]=useState(1);
-  const [form,setForm]=useState({name:"",ic:"",customerBankName:"",customerBankAccount:"",customerAddress:"",bank:"",account:"",amount:"",reference:""});
-  const [tx,setTx]=useState(null);
-  const [bankModal,setBankModal]=useState(false);
-  const [result,setResult]=useState("ON_HOLD");
-  const [deadline,setDeadline]=useState(null);
-  const [tick,setTick]=useState(Date.now());
+  const [txs,setTxs]=useState([]);
+  const [salespersons,setSalespersons]=useState([]);
+  const [newStaff,setNewStaff]=useState({username:"",salesperson_name:"",password:"",company_name:"",logo_data_url:"",biomatrix_id:"",logo_size:140,bank_name:"",bank_account:"",address:"",enabled:true});
+  const [search,setSearch]=useState("");
+  const [tab,setTab]=useState("dashboard");
+  const [selected,setSelected]=useState(null);
+  const [savingStaffId,setSavingStaffId]=useState(null);
+  const [uploadPageSize,setUploadPageSize]=useState(10);
+  const [uploadPage,setUploadPage]=useState(1);
+  const [uploadDate,setUploadDate]=useState("");
+  const [uploadSearch,setUploadSearch]=useState("");
 
-  const [salesperson,setSalesperson]=useState(null);
-  const [loginOpen,setLoginOpen]=useState(false);
-  const [staffLogin,setStaffLogin]=useState({username:"",password:""});
-  const [loginError,setLoginError]=useState("");
-  const [verificationCode,setVerificationCode]=useState("");
-  const [verificationInput,setVerificationInput]=useState("");
-  const [verificationPassed,setVerificationPassed]=useState(false);
-  const [verificationError,setVerificationError]=useState("");
-  const [idFront,setIdFront]=useState("");
-  const [idBack,setIdBack]=useState("");
-  const [selfie,setSelfie]=useState("");
-  const [uploadLink,setUploadLink]=useState("");
-  const [linkBusy,setLinkBusy]=useState(false);
-  const [linkError,setLinkError]=useState("");
-  const [linkProgress,setLinkProgress]=useState(0);
-  const autoLinkStartedRef=useRef(false);
+  async function loadAll(){
+    await fetch("/api/init",{method:"POST"});
+    const [s,b,t,sp]=await Promise.all([
+      fetch("/api/settings").then(r=>r.json()),
+      fetch("/api/banks").then(r=>r.json()),
+      fetch("/api/transactions").then(r=>r.json()),
+      fetch("/api/salespersons").then(r=>r.json())
+    ]);
+    setSettings(s);setBanks(b);setTxs(t);setSalespersons(sp);
+  }
+  useEffect(()=>{ if(authed) loadAll(); },[authed]);
 
-  useEffect(()=>{
-    (async()=>{
-      await fetch("/api/init",{method:"POST"});
-      const [s,b]=await Promise.all([
-        fetch("/api/settings").then(r=>r.json()),
-        fetch("/api/banks").then(r=>r.json())
-      ]);
-      setSettings(s);
-      setBanks(b.filter(x=>x.enabled));
-      try {
-        const saved = sessionStorage.getItem("salesperson_profile");
-        if(saved) setSalesperson(JSON.parse(saved));
-      } catch {}
-    })();
-  },[]);
-
-  useEffect(()=>{
-    const t=setInterval(()=>setTick(Date.now()),1000);
-    return ()=>clearInterval(t);
-  },[]);
-
-  useEffect(()=>{
-    if(step===6){
-      setVerificationCode(String(Math.floor(100000 + Math.random()*900000)));
-      setVerificationInput("");
-      setVerificationPassed(false);
-      setVerificationError("");
-    }
-  },[step]);
-
-
-  useEffect(()=>{
-    if(!tx?.id || step < 8) return;
-    const t=setInterval(async()=>{
-      try{
-        const fresh=await fetch(`/api/transactions/${tx.id}`,{cache:"no-store"}).then(r=>r.json());
-        if(fresh){
-          setTx(fresh);
-          setResult(fresh.status || "ON_HOLD");
-          setDeadline(fresh.deadline || null);
-        }
-      }catch{}
-    },2500);
-    return ()=>clearInterval(t);
-  },[tx?.id,step]);
-
-
-  function compressImageSource(src, maxSide=1100, quality=0.72){
-    return new Promise((resolve,reject)=>{
-      const img=new Image();
-      img.onload=()=>{
-        const scale=Math.min(1,maxSide/Math.max(img.width,img.height));
-        const canvas=document.createElement("canvas");
-        canvas.width=Math.max(1,Math.round(img.width*scale));
-        canvas.height=Math.max(1,Math.round(img.height*scale));
-        const ctx=canvas.getContext("2d");
-        ctx.drawImage(img,0,0,canvas.width,canvas.height);
-        resolve(canvas.toDataURL("image/jpeg",quality));
-      };
-      img.onerror=()=>reject(new Error("Unable to read image."));
-      img.src=src;
-    });
+  function login(){
+    // Demo-only local admin gate. For real deployment, change to server-side auth.
+    if(password === (process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "admin123")) setAuthed(true);
+    else if(password==="admin123") setAuthed(true);
+    else alert("Use demo admin password: admin123");
   }
 
-  function fileToPreview(file,setter){
-    if(!file) return;
-    if(!file.type.startsWith("image/")){
-      alert("Please select an image file.");
-      return;
-    }
-    const reader=new FileReader();
-    reader.onload=async()=>{
-      try{
-        const compressed=await compressImageSource(String(reader.result || ""));
-        setter(compressed);
-      }catch{
-        alert("Unable to process image.");
-      }
-    };
-    reader.readAsDataURL(file);
+  async function saveSettings(){
+    await fetch("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(settings)});
+    alert("Saved. Frontend will use the new settings.");
+  }
+  async function saveBanks(){
+    await fetch("/api/banks",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(banks)});
+    alert("Bank settings saved.");
   }
 
-
-  function calcDeadline(status){
-    if(!settings) return null;
-    const hours = status==="FAILED" ? settings.timers.failedHours : status==="ON_HOLD" ? settings.timers.onHoldHours : 0;
-    return hours ? new Date(Date.now()+hours*3600*1000).toISOString() : null;
-  }
-
-  async function staffSignIn(){
-    setLoginError("");
-    const r=await fetch("/api/salespersons/login",{
+  async function createSalesperson(){
+    const r=await fetch("/api/salespersons",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify(staffLogin)
+      body:JSON.stringify(newStaff)
     });
     const data=await r.json();
-    if(!r.ok){
-      setLoginError(data.error || "Login failed.");
-      return;
-    }
-    setSalesperson(data);
-    sessionStorage.setItem("salesperson_profile",JSON.stringify(data));
-    setStaffLogin({username:"",password:""});
-    setLoginOpen(false);
+    if(!r.ok){ alert(data.error || "Unable to create salesperson."); return; }
+    setSalespersons(x=>[data,...x]);
+    setNewStaff({username:"",salesperson_name:"",password:"",company_name:"",logo_data_url:"",biomatrix_id:"",logo_size:140,bank_name:"",bank_account:"",address:"",enabled:true});
   }
 
-  function staffLogout(){
-    
-    setSalesperson(null);
-    setStep(1);
-    setTx(null);
-    setIdFront("");
-    setIdBack("");
-    setSelfie("");
-    setUploadLink("");
-    setLinkError("");
-    setLinkProgress(0);
-    autoLinkStartedRef.current=false;
-    setForm({name:"",ic:"",customerBankName:"",customerBankAccount:"",customerAddress:"",bank:"",account:"",amount:"",reference:""});
-    sessionStorage.removeItem("salesperson_profile");
-  }
-
-  const customerDetailsReady = Boolean(
-    form.name.trim() &&
-    form.ic.trim().length === 14 &&
-    form.customerBankName.trim() &&
-    form.customerBankAccount.trim() &&
-    form.customerAddress.trim()
-  );
-
-  useEffect(()=>{
-    if(step !== 10 || !salesperson || uploadLink || !customerDetailsReady) return;
-    if(autoLinkStartedRef.current) return;
-
-    autoLinkStartedRef.current = true;
-    setLinkError("");
-    setLinkBusy(true);
-    setLinkProgress(1);
-
-    let cancelled = false;
-    const startedAt = Date.now();
-    const timer = setInterval(()=>{
-      const elapsed = Date.now() - startedAt;
-      const pct = Math.min(100, Math.max(1, Math.floor((elapsed / 1000) * 100)));
-      if(!cancelled) setLinkProgress(pct);
-    }, 30);
-
-    (async()=>{
-      try{
-        const request = fetch("/api/upload-links",{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({
-            transaction_id:tx?.id || null,
-            biomatrix_id:biomatrixValue,
-            name:form.name,
-            ic:form.ic,
-            customer_bank_name:form.customerBankName,
-            customer_bank_account:form.customerBankAccount,
-            customer_address:form.customerAddress,
-            salesperson_id:salesperson?.id || null,
-            salesperson_username:salesperson?.username || null,
-            salesperson_company:salesperson?.company_name || null
-          })
-        }).then(async r=>{
-          const data=await r.json();
-          if(!r.ok) throw new Error(data.error || "Unable to generate upload link.");
-          return data;
-        });
-
-        const [data] = await Promise.all([
-          request,
-          new Promise(resolve=>setTimeout(resolve,1000))
-        ]);
-
-        if(cancelled) return;
-        clearInterval(timer);
-        setLinkProgress(100);
-        if(data.transaction) setTx(data.transaction);
-        setUploadLink(`${window.location.origin}${data.path}`);
-      }catch(e){
-        if(cancelled) return;
-        clearInterval(timer);
-        setLinkError(e.message || "Unable to generate upload link.");
-        autoLinkStartedRef.current=false;
-      }finally{
-        if(!cancelled) setLinkBusy(false);
-      }
-    })();
-
-    return ()=>{
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [step, salesperson, uploadLink, customerDetailsReady]);
-
-  async function createUploadLink(isAuto=false){
-    if(!customerDetailsReady){
-      setLinkError("Please complete Name, IC / Identification No., Bank Name, Bank Account and Address.");
-      if(isAuto) autoLinkStartedRef.current=false;
-      return;
-    }
-    setLinkBusy(true);
-    setLinkError("");
+  async function saveSalesperson(sp){
+    setSavingStaffId(sp.id);
     try{
-      const r=await fetch("/api/upload-links",{
-        method:"POST",
+      const r=await fetch("/api/salespersons",{
+        method:"PUT",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          transaction_id:tx?.id || null,
-          biomatrix_id:biomatrixValue,
-          name:form.name,
-          ic:form.ic,
-          customer_bank_name:form.customerBankName,
-          customer_bank_account:form.customerBankAccount,
-          customer_address:form.customerAddress,
-          salesperson_id:salesperson?.id || null,
-          salesperson_username:salesperson?.username || null,
-          salesperson_company:salesperson?.company_name || null
-        })
+        body:JSON.stringify(sp)
       });
-      const data=await r.json();
-      if(!r.ok) throw new Error(data.error || "Unable to generate upload link.");
-      if(data.transaction) setTx(data.transaction);
-      setUploadLink(`${window.location.origin}${data.path}`);
+      const raw=await r.text();
+      let data={};
+      try{ data=raw ? JSON.parse(raw) : {}; }catch{ data={error:raw || "Unexpected server response."}; }
+      if(!r.ok){
+        alert(data.error || `Unable to save salesperson (HTTP ${r.status}).`);
+        return;
+      }
+      setSalespersons(x=>x.map(v=>v.id===data.id?{...v,...data,password:""}:v));
+      alert("Salesperson saved successfully.");
     }catch(e){
-      setLinkError(e.message || "Unable to generate upload link.");
-      autoLinkStartedRef.current=false;
+      alert(`Save failed: ${e?.message || "Network error"}`);
     }finally{
-      setLinkBusy(false);
+      setSavingStaffId(null);
     }
   }
 
-  async function copyUploadLink(){
-    if(!uploadLink) return;
-    try{
-      await navigator.clipboard.writeText(uploadLink);
-      alert("Upload link copied.");
-    }catch{
-      window.prompt("Copy this upload link:",uploadLink);
-    }
+  async function deleteSalesperson(id){
+    if(!confirm("Delete this salesperson?")) return;
+    await fetch(`/api/salespersons?id=${id}`,{method:"DELETE"});
+    setSalespersons(x=>x.filter(v=>v.id!==id));
+  }
+  async function updateTx(t,status){
+    const hours=status==="FAILED"?settings.timers.failedHours:status==="ON_HOLD"?settings.timers.onHoldHours:0;
+    const deadline=hours?new Date(Date.now()+hours*3600*1000).toISOString():null;
+    const updated=await fetch(`/api/transactions/${t.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,deadline})}).then(r=>r.json());
+    setTxs(x=>x.map(v=>v.id===t.id?updated:v));setSelected(updated);
   }
 
-  async function submit(){
-    const status=deriveCaseStatus(salesperson?.username || "");
-    const dl=calcDeadline(status);
-    setResult(status); setDeadline(dl);
-    const response=await fetch(tx?.id ? `/api/transactions/${tx.id}` : "/api/transactions",{
-      method:tx?.id ? "PUT" : "POST",
+  function uploadStatus(t){
+    if(t.id_front_data_url && t.id_back_data_url && t.selfie_data_url) return "COMPLETED";
+    return "WAITING";
+  }
+
+  function staffForTransaction(t){
+    return salespersons.find(s=>String(s.id)===String(t.salesperson_id))
+      || salespersons.find(s=>String(s.username||"")===String(t.salesperson_username||""))
+      || null;
+  }
+
+  async function saveUploadReview(t, reviewStatus, remark){
+    const r=await fetch(`/api/transactions/${t.id}`,{
+      method:"PUT",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
-        biomatrix_id:(salesperson?.biomatrix_id || settings.biomatrixValue),
-        name:form.name,
-        ic:form.ic,
-        bank:form.bank,
-        account_number:form.account,
-        amount:Number(form.amount||0),
-        reference:form.reference,
-        customer_bank_name:form.customerBankName,
-        customer_bank_account:form.customerBankAccount,
-        customer_address:form.customerAddress,
-        status,
-        deadline:dl,
-        salesperson_id:salesperson?.id || null,
-        salesperson_username:salesperson?.username || null,
-        salesperson_company:salesperson?.company_name || null,
-        id_front_data_url:idFront || null,
-        id_back_data_url:idBack || null,
-        selfie_data_url:selfie || null
+        upload_review_status:reviewStatus || "",
+        upload_remark:remark || ""
       })
     });
-    const created=await response.json();
-    if(!response.ok){
-      alert(created.error || "Unable to save transaction.");
-      return;
-    }
-    setTx(created);
-    setStep(8);
+    const updated=await r.json();
+    if(!r.ok){ alert(updated?.error || "Unable to save."); return; }
+    setTxs(x=>x.map(v=>v.id===t.id?updated:v));
+    if(selected?.id===t.id) setSelected(updated);
   }
 
-  function verifyInternalCode(){
-    if(verificationInput !== verificationCode){
-      setVerificationError("Incorrect verification code.");
-      return;
-    }
-    setVerificationPassed(true);
-    setVerificationError("");
+  async function deleteUploadCase(t){
+    if(!confirm(`Delete case ${t.transaction_id}?`)) return;
+    const r=await fetch(`/api/transactions/${t.id}`,{method:"DELETE"});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok){ alert(data?.error || "Unable to delete case."); return; }
+    setTxs(x=>x.filter(v=>v.id!==t.id));
+    if(selected?.id===t.id) setSelected(null);
   }
 
-  function remaining(){
-    if(!deadline) return "";
-    const ms=Math.max(0,new Date(deadline)-tick);
-    const s=Math.floor(ms/1000), h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60;
-    return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
+  const filtered=useMemo(()=>txs.filter(t=>{
+    const q=search.toLowerCase();
+    return !q || [t.transaction_id,t.name,t.ic,t.customer_bank_name,t.customer_bank_account,t.customer_address,t.bank,t.account_number,t.status,t.salesperson_username,t.salesperson_company].some(v=>String(v||"").toLowerCase().includes(q));
+  }),[txs,search]);
+
+  const uploadFiltered=useMemo(()=>{
+    const q=uploadSearch.trim().toLowerCase();
+    return [...txs]
+      .filter(t=>{
+        const matchesSearch=!q || [
+          t.transaction_id,t.name,t.ic,t.salesperson_username,t.salesperson_company,
+          t.customer_bank_name,t.customer_bank_account,t.upload_review_status,t.upload_remark
+        ].some(v=>String(v||"").toLowerCase().includes(q));
+
+        const d=t.created_at ? new Date(t.created_at) : null;
+        const localDate=d && !Number.isNaN(d.getTime())
+          ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`
+          : "";
+
+        return matchesSearch && (!uploadDate || localDate===uploadDate);
+      })
+      .sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
+  },[txs,uploadSearch,uploadDate]);
+
+  const uploadTotalPages=Math.max(1,Math.ceil(uploadFiltered.length/uploadPageSize));
+  const safeUploadPage=Math.min(uploadPage,uploadTotalPages);
+  const uploadPageRows=uploadFiltered.slice((safeUploadPage-1)*uploadPageSize,safeUploadPage*uploadPageSize);
+
+  function formatUploadDateTime(value){
+    if(!value) return {date:"-",time:"-"};
+    const d=new Date(value);
+    if(Number.isNaN(d.getTime())) return {date:"-",time:"-"};
+    return {
+      date:d.toLocaleDateString("en-GB"),
+      time:d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",second:"2-digit"})
+    };
   }
 
-  if(!settings) return <div className="page"><div className="shell card">Loading...</div></div>;
+  if(!authed) return <main className="page" style={{background:"#eef1eb"}}>
+    <div className="shell" style={{maxWidth:460}}>
+      <div className="card">
+        <h1>Admin</h1><p className="muted">All-in-One Demo Control</p>
+        <label>Password</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&login()}/>
+        <button className="btn btn-primary" style={{width:"100%",marginTop:16}} onClick={login}>Login</button>
+        <div className="muted" style={{marginTop:10}}>Demo password: admin123</div>
+      </div>
+    </div>
+  </main>;
 
-  const brandName = salesperson?.company_name || settings.brandName;
-  const brandLogo = salesperson?.logo_data_url || settings.logoDataUrl;
-  const biomatrixValue = salesperson?.biomatrix_id || settings.biomatrixValue;
-  const staffLogoSize = Math.max(60, Math.min(260, Number(salesperson?.logo_size || settings.logoSize || 140)));
+  if(!settings) return <main className="page"><div className="shell card">Loading...</div></main>;
 
-  const bg = settings.backgroundImageDataUrl
-    ? {backgroundImage:`linear-gradient(rgba(255,255,255,.82),rgba(255,255,255,.82)),url(${settings.backgroundImageDataUrl})`,backgroundSize:"cover",backgroundPosition:"center"}
-    : {backgroundColor:settings.backgroundColor};
+  const stat = {
+    total:txs.length,
+    success:txs.filter(x=>x.status==="SUCCESS").length,
+    failed:txs.filter(x=>x.status==="FAILED").length,
+    onhold:txs.filter(x=>x.status==="ON_HOLD").length
+  };
 
-  const selectedBank = banks.find(b=>b.name===form.bank) || null;
+  const set=(path,val)=>{
+    const parts=path.split(".");
+    const copy=structuredClone(settings);
+    let p=copy;
+    for(let i=0;i<parts.length-1;i++) p=p[parts[i]];
+    p[parts.at(-1)]=val;
+    setSettings(copy);
+  };
 
-  const statusCfg = {
-    SUCCESS:{title:settings.messages.successTitle,text:settings.messages.successText,color:settings.successColor},
-    FAILED:{title:settings.messages.failedTitle,text:settings.messages.failedText,color:settings.failedColor},
-    ON_HOLD:{title:settings.messages.onHoldTitle,text:settings.messages.onHoldText,color:settings.onHoldColor}
-  }[result] || {title:"OnHold",text:"",color:settings.onHoldColor};
-
-  if(!salesperson){
-    return <main className="page" style={bg}>
-      <div className="shell" style={{maxWidth:560}}>
-        <div style={{marginBottom:18}}>
-          {settings.logoDataUrl
-            ? <img src={settings.logoDataUrl} alt="" style={{height:Math.max(70,Number(settings.logoSize||90)),maxWidth:320,objectFit:"contain"}}/>
-            : <>
-                <div style={{fontSize:34,fontWeight:950}}>{settings.brandName || "e-KYC"}</div>
-                <div className="muted">{settings.headerSubtitle || "Secure Access"}</div>
-              </>}
-        </div>
-
-        <div className="card" style={{background:settings.cardColor,padding:30}}>
-          <h1 style={{marginTop:0}}>Login</h1>
-          <p className="muted">Sign in with your staff account to continue.</p>
-
-          <label>User ID</label>
-          <input
-            autoFocus
-            autoComplete="username"
-            value={staffLogin.username}
-            onChange={e=>setStaffLogin({...staffLogin,username:e.target.value})}
-          />
-
-          <label>Password</label>
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={staffLogin.password}
-            onChange={e=>setStaffLogin({...staffLogin,password:e.target.value})}
-            onKeyDown={e=>e.key==="Enter"&&staffSignIn()}
-          />
-
-          {loginError && <div style={{marginTop:10,color:"#b42318",fontWeight:800}}>{loginError}</div>}
-
-          <button className="btn btn-primary" style={{width:"100%",marginTop:18}} onClick={staffSignIn}>
-            Login
-          </button>
+  return <main className="page" style={{background:"#f4f6f9"}}>
+    <div className="shell">
+      <div className="row" style={{justifyContent:"space-between",marginBottom:14}}>
+        <div><h1 style={{margin:0}}>All-in-One Admin</h1><div className="muted">Controls the frontend demo</div></div>
+        <div className="row">
+          {["dashboard","salespersons","branding","text","banks","uploads","transactions"].map(x=><button key={x} className="btn btn-soft" onClick={()=>setTab(x)}>{x}</button>)}
+          <button className="btn btn-soft" onClick={()=>setAuthed(false)}>Logout</button>
         </div>
       </div>
-    </main>;
-  }
 
-  return <main className="page" style={bg}>
-    <div className="shell">
-      <div className="row" style={{justifyContent:"space-between",marginBottom:16}}>
-        <div className="row" style={{justifyContent:settings.logoPosition==="center"?"center":"flex-start",flex:1,minHeight:112}}>
-          {brandLogo ? (
-            <div style={{width:Math.max(360,staffLogoSize*2.6),height:staffLogoSize+16,display:"flex",alignItems:"center",justifyContent:settings.logoPosition==="center"?"center":"flex-start",overflow:"hidden"}}>
-              <img src={brandLogo} alt="" style={{height:staffLogoSize,maxHeight:260,maxWidth:Math.max(350,staffLogoSize*2.5),width:"auto",objectFit:"contain",display:"block"}}/>
-            </div>
-          ) : (
+      {tab==="dashboard" && <>
+        <div className="grid3">
+          <div className="card"><div className="muted">Transactions</div><div style={{fontSize:34,fontWeight:950}}>{stat.total}</div></div>
+          <div className="card"><div className="muted">Successful</div><div style={{fontSize:34,fontWeight:950,color:settings.successColor}}>{stat.success}</div></div>
+          <div className="card"><div className="muted">Failed / OnHold</div><div style={{fontSize:34,fontWeight:950}}>{stat.failed} / {stat.onhold}</div></div>
+        </div>
+        <div className="card" style={{marginTop:14}}>
+          <h2>Quick settings</h2>
+          <div className="grid2">
+            <div><label>BioMatrix ID</label><input value={settings.biomatrixValue} onChange={e=>set("biomatrixValue",e.target.value)}/></div>
+            <div><label>Merchant</label><input value={settings.merchantName} onChange={e=>set("merchantName",e.target.value)}/></div>
+          </div>
+          <button className="btn btn-primary" style={{marginTop:14}} onClick={saveSettings}>Save</button>
+        </div>
+      </>}
+
+
+      {tab==="salespersons" && <div className="card">
+        <h2>Salespersons / Staff Login</h2>
+        <p className="muted">Each salesperson has a separate User ID, password, company name and logo. Adjust Logo Size with the slider and preview it here before saving.</p>
+
+        <div className="card" style={{marginBottom:18,background:"#f8fafc"}}>
+          <h3 style={{marginTop:0}}>Add Salesperson</h3>
+          <div className="grid2">
+            <div><label>User ID</label><input value={newStaff.username} onChange={e=>setNewStaff({...newStaff,username:e.target.value})}/></div>
+            <div><label>Salesperson Name</label><input value={newStaff.salesperson_name || ""} onChange={e=>setNewStaff({...newStaff,salesperson_name:e.target.value})}/></div>
+            <div><label>Password</label><input type="password" value={newStaff.password} onChange={e=>setNewStaff({...newStaff,password:e.target.value})}/></div>
+            <div><label>Company Name</label><input value={newStaff.company_name} onChange={e=>setNewStaff({...newStaff,company_name:e.target.value})}/></div>
+            <div><label>BioMatrix ID (optional)</label><input placeholder="Leave blank = auto-generate" value={newStaff.biomatrix_id || ""} onChange={e=>setNewStaff({...newStaff,biomatrix_id:e.target.value})}/></div>
             <div>
-              <div style={{fontWeight:950,fontSize:30}}>{brandName}</div>
-              <div className="muted" style={{fontSize:16}}>{settings.headerSubtitle}</div>
+              <label>Company Logo</label>
+              <FileToData label="Upload Logo" onData={d=>setNewStaff({...newStaff,logo_data_url:d})}/>
             </div>
+            <div>
+              <label>Logo Size: {newStaff.logo_size || 140}px</label>
+              <input type="range" min="60" max="260" step="5" value={newStaff.logo_size || 140} onChange={e=>setNewStaff({...newStaff,logo_size:Number(e.target.value)})}/>
+              <input type="number" min="60" max="260" value={newStaff.logo_size || 140} onChange={e=>setNewStaff({...newStaff,logo_size:Number(e.target.value)})} style={{marginTop:8}}/>
+            </div>
+            {newStaff.logo_data_url && <div style={{gridColumn:"1 / -1"}}>
+              <label>Live Preview</label>
+              <div style={{minHeight:120,padding:16,border:"1px dashed #cbd6e3",borderRadius:14,background:"#fff",display:"flex",alignItems:"center"}}>
+                <img src={newStaff.logo_data_url} alt="" style={{height:Math.max(60,Math.min(260,Number(newStaff.logo_size || 140))),maxWidth:"100%",objectFit:"contain"}}/>
+              </div>
+            </div>}
+          </div>
+          <button className="btn btn-primary" style={{marginTop:14}} onClick={createSalesperson}>Add Salesperson</button>
+        </div>
+
+        {salespersons.length===0 && <div className="muted">No salesperson accounts yet.</div>}
+
+        {salespersons.map(sp=><div key={sp.id} className="card" style={{marginBottom:14}}>
+          <div className="row" style={{alignItems:"flex-start"}}>
+            <div style={{width:Math.max(150,Math.min(360,Number(sp.logo_size || 140)*2)),minHeight:120,border:"1px dashed #cbd6e3",borderRadius:14,display:"grid",placeItems:"center",overflow:"hidden",background:"#fff",padding:10}}>
+              {sp.logo_data_url ? <img src={sp.logo_data_url} alt="" style={{height:Math.max(60,Math.min(260,Number(sp.logo_size || 140))),maxWidth:"100%",objectFit:"contain"}}/> : <b>{sp.company_name?.slice(0,1) || "S"}</b>}
+            </div>
+            <div style={{flex:1}}>
+              <div className="grid2">
+                <div><label>User ID</label><input value={sp.username} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,username:e.target.value}:v))}/></div>
+                <div><label>Salesperson Name</label><input value={sp.salesperson_name || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,salesperson_name:e.target.value}:v))}/></div>
+                <div><label>Company Name</label><input value={sp.company_name} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,company_name:e.target.value}:v))}/></div>
+                <div><label>New Password (leave blank to keep)</label><input type="password" value={sp.password || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,password:e.target.value}:v))}/></div>
+                <div><label>BioMatrix ID</label><input value={sp.biomatrix_id || ""} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,biomatrix_id:e.target.value}:v))}/></div>
+                <div>
+                  <label>Logo Size: {sp.logo_size || 140}px</label>
+                  <input type="range" min="60" max="260" step="5" value={sp.logo_size || 140} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,logo_size:Number(e.target.value)}:v))}/>
+                  <input type="number" min="60" max="260" value={sp.logo_size || 140} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,logo_size:Number(e.target.value)}:v))} style={{marginTop:8}}/>
+                </div>
+                <div>
+                  <label>Status</label>
+                  <select value={sp.enabled?"enabled":"disabled"} onChange={e=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,enabled:e.target.value==="enabled"}:v))}>
+                    <option value="enabled">Enabled</option>
+                    <option value="disabled">Disabled</option>
+                  </select>
+                </div>
+              </div>
+              <div className="row" style={{marginTop:12}}>
+                <FileToData label="Replace Logo" onData={d=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,logo_data_url:d}:v))}/>
+                <button className="btn btn-soft" onClick={()=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,logo_data_url:""}:v))}>Remove Logo</button>
+                <button className="btn btn-primary" disabled={savingStaffId===sp.id} onClick={()=>saveSalesperson(sp)}>{savingStaffId===sp.id?"Saving...":"Save"}</button>
+                <button className="btn btn-soft" onClick={()=>deleteSalesperson(sp.id)}>Delete</button>
+              </div>
+            </div>
+          </div>
+        </div>)}
+      </div>}
+
+      {tab==="branding" && <div className="card">
+        <h2>Branding / Appearance</h2>
+        <div className="grid2">
+          <div><label>Brand name</label><input value={settings.brandName} onChange={e=>set("brandName",e.target.value)}/></div>
+          <div><label>Header subtitle</label><input value={settings.headerSubtitle} onChange={e=>set("headerSubtitle",e.target.value)}/></div>
+          <div><label>Merchant name</label><input value={settings.merchantName} onChange={e=>set("merchantName",e.target.value)}/></div>
+          <div><label>Logo size</label><input type="number" value={settings.logoSize} onChange={e=>set("logoSize",Number(e.target.value))}/></div>
+          <div><label>Logo position</label><select value={settings.logoPosition} onChange={e=>set("logoPosition",e.target.value)}><option>left</option><option>center</option><option>right</option></select></div>
+          <div><label>Background color</label><input type="color" value={settings.backgroundColor} onChange={e=>set("backgroundColor",e.target.value)}/></div>
+          <div><label>Primary color</label><input type="color" value={settings.primaryColor} onChange={e=>set("primaryColor",e.target.value)}/></div>
+          <div><label>Success color</label><input type="color" value={settings.successColor} onChange={e=>set("successColor",e.target.value)}/></div>
+          <div><label>Failed color</label><input type="color" value={settings.failedColor} onChange={e=>set("failedColor",e.target.value)}/></div>
+          <div><label>OnHold color</label><input type="color" value={settings.onHoldColor} onChange={e=>set("onHoldColor",e.target.value)}/></div>
+        </div>
+        <div className="row" style={{marginTop:14}}>
+          <FileToData label="Upload Logo" onData={d=>set("logoDataUrl",d)}/>
+          <button className="btn btn-soft" onClick={()=>set("logoDataUrl","")}>Remove Logo</button>
+          <FileToData label="Upload Background" onData={d=>set("backgroundImageDataUrl",d)}/>
+          <button className="btn btn-soft" onClick={()=>set("backgroundImageDataUrl","")}>Remove Background</button>
+        </div>
+        {settings.logoDataUrl && <img src={settings.logoDataUrl} alt="" style={{maxHeight:100,maxWidth:320,marginTop:14}}/>}
+        <button className="btn btn-primary" style={{marginTop:18}} onClick={saveSettings}>Save Branding</button>
+      </div>}
+
+      {tab==="text" && <div className="card">
+        <h2>All Text / Timers</h2>
+        <div className="grid2">
+          {Object.entries(settings.labels).map(([k,v])=><div key={k}><label>{k}</label><input value={v} onChange={e=>set(`labels.${k}`,e.target.value)}/></div>)}
+        </div>
+        <h3>Messages</h3>
+        {Object.entries(settings.messages).map(([k,v])=><div key={k}><label>{k}</label><textarea rows={3} value={v} onChange={e=>set(`messages.${k}`,e.target.value)}/></div>)}
+        <div className="grid2">
+          <div><label>Failed timer hours</label><input type="number" value={settings.timers.failedHours} onChange={e=>set("timers.failedHours",Number(e.target.value))}/></div>
+          <div><label>OnHold timer hours</label><input type="number" value={settings.timers.onHoldHours} onChange={e=>set("timers.onHoldHours",Number(e.target.value))}/></div>
+        </div>
+        <button className="btn btn-primary" style={{marginTop:18}} onClick={saveSettings}>Save Text / Timers</button>
+      </div>}
+
+      {tab==="banks" && <div className="card">
+        <h2>Banks</h2><p className="muted">Enable / disable banks, upload each bank logo, and reorder them. Click Save Banks after changes.</p>
+        {banks.map((b,i)=><div className="row" key={b.id} style={{padding:"10px 0",borderBottom:"1px solid #edf1f5"}}>
+          <input type="checkbox" style={{width:18}} checked={b.enabled} onChange={e=>setBanks(x=>x.map(v=>v.id===b.id?{...v,enabled:e.target.checked}:v))}/>
+          <div style={{width:44,height:44,border:"1px solid #dfe6ef",borderRadius:10,background:"#fff",display:"grid",placeItems:"center",overflow:"hidden"}}>
+            {b.logo_data_url ? <img src={b.logo_data_url} alt="" style={{width:"100%",height:"100%",objectFit:"contain"}}/> : <span style={{fontWeight:900}}>{b.name.slice(0,1)}</span>}
+          </div>
+          <div style={{flex:1,minWidth:220}}>{b.name}</div>
+          <label className="btn btn-soft" style={{display:"inline-block"}}>
+            Upload Logo
+            <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" style={{display:"none"}} onChange={e=>{
+              const f=e.target.files?.[0]; if(!f) return;
+              const r=new FileReader();
+              r.onload=()=>setBanks(x=>x.map(v=>v.id===b.id?{...v,logo_data_url:r.result}:v));
+              r.readAsDataURL(f);
+            }}/>
+          </label>
+          {b.logo_data_url && <button className="btn btn-soft" onClick={()=>setBanks(x=>x.map(v=>v.id===b.id?{...v,logo_data_url:""}:v))}>Remove Logo</button>}
+          <button className="btn btn-soft" onClick={()=>i>0&&setBanks(x=>{const a=[...x];[a[i-1],a[i]]=[a[i],a[i-1]];return a})}>↑</button>
+          <button className="btn btn-soft" onClick={()=>i<banks.length-1&&setBanks(x=>{const a=[...x];[a[i+1],a[i]]=[a[i],a[i+1]];return a})}>↓</button>
+        </div>)}
+        <button className="btn btn-primary" style={{marginTop:18}} onClick={saveBanks}>Save Banks</button>
+      </div>}
+
+      {tab==="uploads" && <div className="card">
+        <div className="row" style={{justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <h2 style={{marginBottom:4}}>Upload Verification</h2>
+            <div className="muted">Check the customer's ID front, ID back and selfie.</div>
+          </div>
+          <button className="btn btn-soft" onClick={loadAll}>Refresh</button>
+        </div>
+
+        <div className="row" style={{marginTop:16,gap:10,flexWrap:"wrap",alignItems:"end"}}>
+          <div style={{minWidth:240,flex:"1 1 260px"}}>
+            <label>Search</label>
+            <input
+              placeholder="Case / staff / customer / IC / bank..."
+              value={uploadSearch}
+              onChange={e=>{setUploadSearch(e.target.value);setUploadPage(1);}}
+            />
+          </div>
+
+          <div style={{minWidth:170}}>
+            <label>Date</label>
+            <input
+              type="date"
+              value={uploadDate}
+              onChange={e=>{setUploadDate(e.target.value);setUploadPage(1);}}
+            />
+          </div>
+
+          <div style={{minWidth:130}}>
+            <label>Show</label>
+            <select
+              value={uploadPageSize}
+              onChange={e=>{setUploadPageSize(Number(e.target.value));setUploadPage(1);}}
+            >
+              <option value={10}>10</option>
+              <option value={30}>30</option>
+              <option value={60}>60</option>
+              <option value={100}>100</option>
+            </select>
+          </div>
+
+          {(uploadDate || uploadSearch) && (
+            <button className="btn btn-soft" onClick={()=>{setUploadDate("");setUploadSearch("");setUploadPage(1);}}>
+              Clear
+            </button>
           )}
         </div>
 
-        <div className="row">
-          {salesperson ? <>
-            <div style={{textAlign:"right",maxWidth:360,lineHeight:1.45}}>
-              <div style={{fontWeight:950,fontSize:17}}>{salesperson.salesperson_name || salesperson.username}</div>
-              <div className="muted"><b>BioMatrix ID:</b> {salesperson.biomatrix_id || biomatrixValue || "-"}</div>
-            </div>
-            <button className="btn btn-soft" onClick={staffLogout}>Logout</button>
-          </> : null}
+        <div className="muted" style={{marginTop:10}}>
+          Showing {uploadFiltered.length===0?0:(safeUploadPage-1)*uploadPageSize+1}
+          {" - "}
+          {Math.min(safeUploadPage*uploadPageSize,uploadFiltered.length)}
+          {" of "}
+          {uploadFiltered.length}
         </div>
-      </div>
 
-      <div className="card" style={{background:settings.cardColor}}>
-        {step===1 && <>
-          <h1>{settings.labels.paymentTitle}</h1><p className="muted">{settings.labels.paymentSubtitle}</p>
-          <label>{settings.biomatrixLabel}</label><input value={biomatrixValue} readOnly/>
-          <div className="grid2">
-            <div><label>{settings.labels.name}</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>
-            <div><label>{settings.labels.ic}</label><input inputMode="numeric" maxLength={14} placeholder="000000-00-0000" value={form.ic} onChange={e=>setForm({...form,ic:formatIc(e.target.value)})}/></div>
+        <div style={{overflowX:"auto",marginTop:12}}>
+          <table className="table" style={{width:"100%",tableLayout:"fixed",fontSize:12}}>
+            <thead><tr>
+              <th style={{width:"12%"}}>Case</th>
+              <th style={{width:"18%"}}>Staff Details</th>
+              <th style={{width:"10%"}}>Customer</th>
+              <th style={{width:"10%"}}>Date / Time</th>
+              <th style={{width:"8%"}}>Status</th>
+              <th style={{width:"9%"}}>Uploads</th>
+              <th style={{width:"12%"}}>Review Status</th>
+              <th style={{width:"13%"}}>Remark</th>
+              <th style={{width:"8%"}}>Actions</th>
+            </tr></thead>
+            <tbody>
+              {uploadPageRows.map(t=>{
+                const staff=staffForTransaction(t);
+                return <tr key={t.id}>
+                <td style={{wordBreak:"break-all",fontSize:12}}>{t.transaction_id}</td>
 
-            <div><label>Bank Name</label><input value={form.customerBankName} onChange={e=>setForm({...form,customerBankName:e.target.value})}/></div>
-            <div><label>Bank Account</label><input value={form.customerBankAccount} onChange={e=>setForm({...form,customerBankAccount:e.target.value})}/></div>
+                <td style={{fontSize:12,lineHeight:1.45}}>
+                  <div><b>{staff?.salesperson_name||t.salesperson_username||"-"}</b></div>
+                  <div className="muted">User ID: {t.salesperson_username||staff?.username||"-"}</div>
+                  <div className="muted">{t.salesperson_company||staff?.company_name||"-"}</div>
+                  <div className="muted" style={{wordBreak:"break-word"}}>{t.biomatrix_id||staff?.biomatrix_id||"-"}</div>
+                </td>
 
-            <div style={{gridColumn:"1 / -1"}}>
-              <label>Address</label>
-              <textarea rows={3} value={form.customerAddress} onChange={e=>setForm({...form,customerAddress:e.target.value})}/>
-            </div>
-          </div>
-          <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
+                <td style={{fontSize:12,wordBreak:"break-word"}}>{t.name||"-"}</td>
+
+                <td style={{fontSize:12,lineHeight:1.45}}>
+                  <div>{formatUploadDateTime(t.created_at).date}</div>
+                  <div className="muted">{formatUploadDateTime(t.created_at).time}</div>
+                </td>
+
+                <td style={{fontSize:12}}><b>{uploadStatus(t)}</b></td>
+
+                <td style={{fontSize:12,lineHeight:1.55,whiteSpace:"nowrap"}}>
+                  <div>Front {t.id_front_data_url?"✅":"—"}</div>
+                  <div>Back {t.id_back_data_url?"✅":"—"}</div>
+                  <div>Selfie {t.selfie_data_url?"✅":"—"}</div>
+                </td>
+
+                <td>
+                  <select
+                    style={{width:"100%",minWidth:0,fontSize:12,padding:"8px 6px"}}
+                    value={t.upload_review_status||""}
+                    onChange={e=>setTxs(x=>x.map(v=>v.id===t.id?{...v,upload_review_status:e.target.value}:v))}
+                  >
+                    <option value="">Select</option>
+                    <option value="WAITING">Waiting</option>
+                    <option value="CONTACTED">Contacted</option>
+                    <option value="CHECKING">Checking</option>
+                    <option value="NEED_REUPLOAD">Need Re-upload</option>
+                    <option value="COMPLETED">Completed</option>
+                    <option value="CANCELLED">Cancelled</option>
+                  </select>
+                </td>
+
+                <td>
+                  <input
+                    style={{width:"100%",minWidth:0,fontSize:12,padding:"8px 6px"}}
+                    placeholder="Optional..."
+                    value={t.upload_remark||""}
+                    onChange={e=>setTxs(x=>x.map(v=>v.id===t.id?{...v,upload_remark:e.target.value}:v))}
+                  />
+                </td>
+
+                <td>
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    <button
+                      className="btn btn-soft"
+                      style={{padding:"7px 8px",fontSize:12}}
+                      onClick={()=>{
+                        const cur=txs.find(v=>v.id===t.id) || t;
+                        saveUploadReview(t,cur.upload_review_status||"",cur.upload_remark||"");
+                      }}
+                    >
+                      Save
+                    </button>
+                    <button className="btn btn-primary" style={{padding:"7px 8px",fontSize:12}} onClick={()=>setSelected(t)}>Verify</button>
+                    <button className="btn btn-soft" style={{padding:"7px 8px",fontSize:12}} onClick={()=>deleteUploadCase(t)}>Delete</button>
+                  </div>
+                </td>
+              </tr>
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="row" style={{justifyContent:"space-between",alignItems:"center",marginTop:16,flexWrap:"wrap"}}>
+          <div className="muted">Page {safeUploadPage} / {uploadTotalPages}</div>
+          <div className="row">
             <button
-              className="btn btn-primary"
-              disabled={!customerDetailsReady}
-              onClick={()=>{
-                if(!customerDetailsReady) return;
-                setLinkError("");
-                setLinkProgress(0);
-                autoLinkStartedRef.current=false;
-                setStep(10);
-              }}
+              className="btn btn-soft"
+              disabled={safeUploadPage<=1}
+              onClick={()=>setUploadPage(p=>Math.max(1,p-1))}
             >
-              Continue
+              Previous
+            </button>
+            <button
+              className="btn btn-soft"
+              disabled={safeUploadPage>=uploadTotalPages}
+              onClick={()=>setUploadPage(p=>Math.min(uploadTotalPages,p+1))}
+            >
+              Next
             </button>
           </div>
-        </>}
+        </div>
+      </div>}
 
-        {step===10 && <>
-          <div style={{maxWidth:760,margin:"0 auto",padding:"28px 0"}}>
-            {!uploadLink && <h1 style={{textAlign:"center"}}>Processing</h1>}
+      {tab==="transactions" && <div className="card">
+        <div className="row" style={{justifyContent:"space-between"}}><h2>Transactions</h2><input style={{maxWidth:320}} placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)}/></div>
+        <div style={{overflowX:"auto"}}>
+          <table className="table"><thead><tr><th>ID</th><th>Staff</th><th>Company</th><th>Name</th><th>Bank</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+          <tbody>{filtered.map(t=><tr key={t.id}>
+            <td>{t.transaction_id}</td><td>{t.salesperson_username||"-"}</td><td>{t.salesperson_company||"-"}</td><td>{t.name}</td><td>{t.bank}</td><td>RM {Number(t.amount).toFixed(2)}</td><td>{t.status}</td>
+            <td><button className="btn btn-soft" onClick={()=>setSelected(t)}>Open</button></td>
+          </tr>)}</tbody></table>
+        </div>
+      </div>}
 
-            {!uploadLink ? <>
-              <div style={{marginTop:34}}>
-                <div style={{display:"flex",justifyContent:"space-between",fontWeight:900,marginBottom:10}}>
-                  <span>{"Loading" + ".".repeat((Math.floor((linkProgress || 1) / 12) % 3) + 1)}</span>
-                  <span>{Math.max(1,linkProgress || 1)}%</span>
-                </div>
+      {selected && <div className="modalBack" onClick={()=>setSelected(null)}>
+        <div className="modal" onClick={e=>e.stopPropagation()}>
+          <h2>{selected.transaction_id}</h2>
+          {(()=>{
+            const staff=staffForTransaction(selected);
+            return <>
+              <div className="kv"><span>User ID</span><b>{selected.salesperson_username||staff?.username||"-"}</b></div>
+              <div className="kv"><span>Salesperson Name</span><b>{staff?.salesperson_name||"-"}</b></div>
+              <div className="kv"><span>Company</span><b>{selected.salesperson_company||staff?.company_name||"-"}</b></div>
+              <div className="kv"><span>BioMatrix ID</span><b>{selected.biomatrix_id||staff?.biomatrix_id||"-"}</b></div>
+            </>;
+          })()}
+          {["name","ic","customer_bank_name","customer_bank_account","customer_address","bank","account_number","amount","reference","status","deadline","created_at"].map(k=><div className="kv" key={k}><span>{k}</span><b>{String(selected[k]??"")}</b></div>)}
 
-                <div style={{height:14,borderRadius:999,background:"#e9eef6",overflow:"hidden"}}>
-                  <div
-                    style={{
-                      height:"100%",
-                      width:`${Math.max(1,linkProgress || 1)}%`,
-                      background:"#1264d8",
-                      transition:"width 30ms linear",
-                      borderRadius:999
-                    }}
-                  />
-                </div>
+          <div style={{marginTop:18,padding:14,border:"1px solid #dfe6ef",borderRadius:12}}>
+            <div className="kv"><span>Upload Status</span><b>{uploadStatus(selected)}</b></div>
+            <div style={{marginTop:10}}>
+              <label>Review Status</label>
+              <select
+                value={selected.upload_review_status||""}
+                onChange={e=>setSelected({...selected,upload_review_status:e.target.value})}
+              >
+                <option value="">Select</option>
+                <option value="WAITING">Waiting</option>
+                <option value="CONTACTED">Contacted</option>
+                <option value="CHECKING">Checking</option>
+                <option value="NEED_REUPLOAD">Need Re-upload</option>
+                <option value="COMPLETED">Completed</option>
+                <option value="CANCELLED">Cancelled</option>
+              </select>
 
-                {linkError && <>
-                  <div style={{color:"#b42318",fontWeight:800,textAlign:"center",marginTop:16}}>{linkError}</div>
-                  <div className="row" style={{justifyContent:"center",marginTop:12}}>
-                    <button
-                      className="btn btn-soft"
-                      onClick={()=>{
-                        autoLinkStartedRef.current=false;
-                        setLinkProgress(0);
-                        createUploadLink();
-                      }}
-                    >
-                      Try Again
-                    </button>
-                  </div>
-                </>}
-              </div>
-            </> : <>
-              <div style={{marginTop:28}}>
-                <div style={{fontWeight:950,fontSize:18,marginBottom:10}}>Customer Upload Link</div>
-                <input value={uploadLink} readOnly onFocus={e=>e.currentTarget.select()}/>
-                <div className="muted" style={{marginTop:8}}>
-                  Valid for 24 hours. Regenerating creates a new link and invalidates the previous active link.
-                </div>
-
-                <div className="row" style={{justifyContent:"space-between",marginTop:18,flexWrap:"wrap",gap:10}}>
-                  <button className="btn btn-soft" onClick={()=>setStep(1)}>Back</button>
-
-                  <div className="row" style={{flexWrap:"wrap"}}>
-                    <button className="btn btn-primary" onClick={copyUploadLink}>Copy Link</button>
-                    <button
-                      className="btn btn-soft"
-                      onClick={async ()=>{
-                        setUploadLink("");
-                        setLinkProgress(0);
-                        autoLinkStartedRef.current=false;
-                        setTimeout(()=>autoLinkStartedRef.current=false,0);
-                      }}
-                      disabled={linkBusy}
-                    >
-                      Regenerate Link
-                    </button>
-                    <button className="btn btn-soft" onClick={()=>setStep(2)}>Upload Here</button>
-                  </div>
-                </div>
-              </div>
-            </>}
-          </div>
-        </>}
-
-        {step===2 && <>
-          <h1>Identity Verification</h1>
-          <div style={{marginBottom:18,borderRadius:18,overflow:"hidden",border:"1px solid #dfe6ef",background:"#fff"}}>
-            <img
-              src="/ekyc-guide.png"
-              alt="e-KYC Malaysia verification guide"
-              style={{width:"100%",display:"block",objectFit:"cover"}}
-            />
-          </div>
-          <p className="muted">Please review the guide above, then upload the front and back of the identification card and upload a selfie.</p>
-
-          <div className="grid2">
-            <div>
-              <label>Identification Card — Front</label>
-              <label className="btn btn-soft" style={{display:"inline-block"}}>
-                Upload Front
-                <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>fileToPreview(e.target.files?.[0],setIdFront)}/>
-              </label>
-              {idFront && <div style={{marginTop:10,border:"1px solid #dfe6ef",borderRadius:14,padding:8,background:"#fff"}}>
-                <img src={idFront} alt="Identification card front preview" style={{width:"100%",maxHeight:220,objectFit:"contain",display:"block",borderRadius:10}}/>
-              </div>}
-            </div>
-
-            <div>
-              <label>Identification Card — Back</label>
-              <label className="btn btn-soft" style={{display:"inline-block"}}>
-                Upload Back
-                <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>fileToPreview(e.target.files?.[0],setIdBack)}/>
-              </label>
-              {idBack && <div style={{marginTop:10,border:"1px solid #dfe6ef",borderRadius:14,padding:8,background:"#fff"}}>
-                <img src={idBack} alt="Identification card back preview" style={{width:"100%",maxHeight:220,objectFit:"contain",display:"block",borderRadius:10}}/>
-              </div>}
-            </div>
-          </div>
-
-          <div className="card" style={{marginTop:16}}>
-            <h3 style={{marginTop:0}}>Selfie</h3>
-            <p className="muted">Upload a clear selfie image.</p>
-
-            <label className="btn btn-soft" style={{display:"inline-block"}}>
-              Upload Selfie
-              <input
-                type="file"
-                accept="image/*"
-                style={{display:"none"}}
-                onChange={e=>fileToPreview(e.target.files?.[0],setSelfie)}
+              <label style={{marginTop:10}}>Remark (optional)</label>
+              <textarea
+                rows={3}
+                value={selected.upload_remark||""}
+                onChange={e=>setSelected({...selected,upload_remark:e.target.value})}
+                placeholder="Write anything here only when needed..."
               />
-            </label>
 
-            {selfie && <>
-              <img
-                src={selfie}
-                alt="Selfie preview"
-                style={{
-                  width:"100%",
-                  maxWidth:360,
-                  maxHeight:360,
-                  objectFit:"cover",
-                  borderRadius:16,
-                  display:"block",
-                  marginTop:10
-                }}
-              />
-              <div className="row" style={{marginTop:12}}>
-                <label className="btn btn-soft" style={{display:"inline-block"}}>
-                  Replace Selfie
-                  <input
-                    type="file"
-                    accept="image/*"
-                    style={{display:"none"}}
-                    onChange={e=>fileToPreview(e.target.files?.[0],setSelfie)}
-                  />
-                </label>
+              <div style={{marginTop:10}}>
+                <button
+                  className="btn btn-soft"
+                  onClick={()=>saveUploadReview(
+                    selected,
+                    selected.upload_review_status||"",
+                    selected.upload_remark||""
+                  )}
+                >
+                  Save
+                </button>
               </div>
-            </>}
-
-            <div className="muted" style={{marginTop:10}}>
-              The selected image will be saved with the transaction when the transaction is submitted.
             </div>
           </div>
 
-          <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
-            <button className="btn btn-soft" onClick={()=>{setStep(1)}}>Back</button>
-            <button
-              className="btn btn-primary"
-              disabled={!idFront || !idBack || !selfie}
-              style={{opacity:(!idFront || !idBack || !selfie)?0.55:1}}
-              onClick={()=>{setStep(3)}}
-            >Continue</button>
-          </div>
-        </>}
-
-        {step===3 && <>
-          <h1>{settings.labels.selectBankTitle}</h1>
-          <div className="grid3">
-            {banks.map(b=><button key={b.id} className="btn btn-soft" style={{textAlign:"left",display:"flex",alignItems:"center",gap:10,minHeight:58}} onClick={()=>{setForm({...form,bank:b.name});setBankModal(true)}}>
-              <BankLogo bank={b} size={34}/>
-              <span>{b.name}</span>
-            </button>)}
-          </div>
-          {form.bank && <div style={{marginTop:18}} className="card">
-            <b>{form.bank}</b><div className="muted">{form.account ? `Account: ${form.account}`:"No account selected"}</div>
-            {form.amount && <div className="muted">Amount: {money(form.amount)}</div>}
-          </div>}
-          <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
-            <button className="btn btn-soft" onClick={()=>setStep(2)}>Back</button>
-            <button className="btn btn-primary" onClick={()=>form.bank&&form.account&&form.amount&&setStep(5)}>Continue with FPX</button>
-          </div>
-        </>}
-
-        {step===5 && <>
-          <h1>Transaction Confirmation</h1>
-          <div className="kv"><span>Company</span><b>{brandName}</b></div>
-          <div className="kv"><span>Staff</span><b>{salesperson?.username}</b></div>
-          <div className="kv"><span>Merchant</span><b>{settings.merchantName}</b></div>
-          <div className="kv"><span>{settings.labels.name}</span><b>{form.name}</b></div>
-          <div className="kv"><span>{settings.labels.ic}</span><b>{form.ic}</b></div>
-          <div className="kv"><span>Customer Bank Name</span><b>{form.customerBankName}</b></div>
-          <div className="kv"><span>Customer Bank Account</span><b>{form.customerBankAccount}</b></div>
-          <div className="kv"><span>Customer Address</span><b>{form.customerAddress}</b></div>
-          <div className="kv"><span>Selected Bank</span><b>{form.bank}</b></div>
-          <div className="kv"><span>{settings.labels.accountNumber}</span><b>{form.account}</b></div>
-          <div className="kv"><span>{settings.labels.amount}</span><b>{money(form.amount)}</b></div>
-          {form.reference && <div className="kv"><span>{settings.labels.reference}</span><b>{form.reference}</b></div>}
-          <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
-            <button className="btn btn-soft" onClick={()=>setStep(2)}>Back</button>
-            <button className="btn btn-primary" onClick={()=>setStep(6)}>Confirm Payment</button>
-          </div>
-        </>}
-
-        {step===6 && <>
-          <h1>{settings.labels.verification}</h1>
-          <p className="muted">Internal verification code.</p>
-          <div className="card" style={{marginBottom:14,background:"#f8fafc"}}>
-            <div className="muted">Generated Code</div>
-            <div style={{fontSize:28,fontWeight:950,letterSpacing:5}}>{verificationCode}</div>
-          </div>
-          <label>Verification Code</label>
-          <input inputMode="numeric" maxLength={6} value={verificationPassed ? "******" : verificationInput} readOnly={verificationPassed} placeholder="Enter 6-digit code" onChange={e=>setVerificationInput(e.target.value.replace(/\D/g,"").slice(0,6))} onKeyDown={e=>{ if(e.key==="Enter" && !verificationPassed) verifyInternalCode(); }}/>
-          {verificationError && <div style={{marginTop:8,color:"#b42318",fontWeight:800}}>{verificationError}</div>}
-          <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
-            {!verificationPassed ? <button className="btn btn-primary" onClick={verifyInternalCode}>Verify</button> : <button className="btn btn-primary" onClick={()=>setStep(7)}>Continue</button>}
-          </div>
-        </>}
-
-        {step===7 && <div style={{textAlign:"center",padding:50}}>
-          <h1>{settings.labels.processing}</h1><p className="muted">Processing transaction...</p>
-          <button className="btn btn-primary" onClick={submit}>Continue</button>
-        </div>}
-
-        {step===8 && <>
-          <div style={{textAlign:"center"}}>
-            <div style={{width:84,height:84,borderRadius:"50%",margin:"0 auto 14px",display:"grid",placeItems:"center",background:`${statusCfg.color}20`,color:statusCfg.color,fontSize:40,fontWeight:900}}>
-              {result==="SUCCESS"?"✓":result==="FAILED"?"×":"…"}
+          <div style={{marginTop:18}}>
+            <h3>KYC Images</h3>
+            <div className="grid3">
+              <div>
+                <div className="muted" style={{marginBottom:6}}>ID Front</div>
+                {selected.id_front_data_url
+                  ? <a href={selected.id_front_data_url} target="_blank" rel="noreferrer"><img src={selected.id_front_data_url} alt="ID front" style={{width:"100%",height:180,objectFit:"contain",border:"1px solid #dfe6ef",borderRadius:12,background:"#fff"}}/></a>
+                  : <div className="muted">Not uploaded</div>}
+              </div>
+              <div>
+                <div className="muted" style={{marginBottom:6}}>ID Back</div>
+                {selected.id_back_data_url
+                  ? <a href={selected.id_back_data_url} target="_blank" rel="noreferrer"><img src={selected.id_back_data_url} alt="ID back" style={{width:"100%",height:180,objectFit:"contain",border:"1px solid #dfe6ef",borderRadius:12,background:"#fff"}}/></a>
+                  : <div className="muted">Not uploaded</div>}
+              </div>
+              <div>
+                <div className="muted" style={{marginBottom:6}}>Selfie</div>
+                {selected.selfie_data_url
+                  ? <a href={selected.selfie_data_url} target="_blank" rel="noreferrer"><img src={selected.selfie_data_url} alt="Selfie" style={{width:"100%",height:180,objectFit:"cover",border:"1px solid #dfe6ef",borderRadius:12,background:"#fff"}}/></a>
+                  : <div className="muted">Not uploaded</div>}
+              </div>
             </div>
-            <h1 style={{color:statusCfg.color}}>{statusCfg.title}</h1>
-            <p>{statusCfg.text}</p>
-            {deadline && <div className="card" style={{maxWidth:460,margin:"14px auto",borderColor:statusCfg.color,color:statusCfg.color}}>
-              <div className="muted">Time remaining</div>
-              <div style={{fontSize:32,fontWeight:950}}>{remaining()}</div>
-              <div className="muted">Deadline: {fmtTime(deadline)}</div>
-            </div>}
           </div>
-          <div className="kv"><span>Transaction ID</span><b>{tx?.transaction_id}</b></div>
-          <div className="kv"><span>Status</span><b style={{color:statusCfg.color}}>{result==="SUCCESS"?"Successful":result==="FAILED"?"Failed":"OnHold"}</b></div>
-          <div className="kv"><span>Company</span><b>{tx?.salesperson_company || brandName}</b></div>
-          <div className="kv"><span>Staff</span><b>{tx?.salesperson_username || salesperson?.username}</b></div>
-          <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
-          <div className="kv"><span>Amount</span><b>{money(form.amount)}</b></div>
-          <div className="row" style={{justifyContent:"flex-end",marginTop:18}}><button className="btn btn-primary" onClick={()=>setStep(9)}>View Receipt</button></div>
-        </>}
 
-        {step===9 && <>
-          <h1>{settings.labels.receipt}</h1>
-          <div className="kv"><span>Status</span><b style={{color:statusCfg.color}}>{result==="SUCCESS"?"Successful":result==="FAILED"?"Failed":"OnHold"}</b></div>
-          <div className="kv"><span>Transaction ID</span><b>{tx?.transaction_id}</b></div>
-          <div className="kv"><span>Company</span><b>{tx?.salesperson_company || brandName}</b></div>
-          <div className="kv"><span>Staff</span><b>{tx?.salesperson_username || salesperson?.username}</b></div>
-          <div className="kv"><span>Merchant</span><b>{settings.merchantName}</b></div>
-          <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
-          <div className="kv"><span>{settings.labels.accountNumber}</span><b>{form.account}</b></div>
-          <div className="kv"><span>{settings.biomatrixLabel}</span><b>{tx?.biomatrix_id || biomatrixValue}</b></div>
-          {form.reference && <div className="kv"><span>{settings.labels.reference}</span><b>{form.reference}</b></div>}
-          <div className="kv"><span>{settings.labels.name}</span><b>{form.name}</b></div>
-          <div className="kv"><span>{settings.labels.ic}</span><b>{form.ic}</b></div>
-          <div className="kv"><span>{settings.labels.amount}</span><b>{money(form.amount)}</b></div>
-          <div className="kv"><span>Date / Time</span><b>{fmtTime(tx?.created_at)}</b></div>
-          <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
-            <button className="btn btn-soft" onClick={()=>window.print()}>{settings.labels.printReceipt}</button>
-            <button className="btn btn-primary" onClick={()=>{setStep(1);setTx(null);setIdFront("");setIdBack("");setSelfie("");setUploadLink("");setLinkError("");setForm({name:"",ic:"",customerBankName:"",customerBankAccount:"",customerAddress:"",bank:"",account:"",amount:"",reference:""})}}>{settings.labels.returnHome}</button>
+          <div className="row" style={{marginTop:16}}>
+            <button className="btn" style={{background:settings.successColor,color:"#fff"}} onClick={()=>updateTx(selected,"SUCCESS")}>Successful</button>
+            <button className="btn" style={{background:settings.failedColor,color:"#fff"}} onClick={()=>updateTx(selected,"FAILED")}>Failed</button>
+            <button className="btn" style={{background:settings.onHoldColor,color:"#fff"}} onClick={()=>updateTx(selected,"ON_HOLD")}>OnHold</button>
+            <button className="btn btn-soft" onClick={()=>setSelected(null)}>Close</button>
           </div>
-        </>}
-      </div>
+        </div>
+      </div>}
     </div>
-
-    {bankModal && <div className="modalBack" onClick={()=>setBankModal(false)}>
-      <div className="modal" onClick={e=>e.stopPropagation()}>
-        <div className="row" style={{alignItems:"center",gap:14,marginBottom:12}}>
-          <BankLogo bank={selectedBank || {name:form.bank}} size={72}/>
-          <div style={{minWidth:0}}>
-            <div className="muted">Selected Bank</div>
-            <h2 style={{margin:"2px 0 0",lineHeight:1.2}}>{form.bank}</h2>
-          </div>
-        </div>
-        <label>{settings.labels.accountNumber}</label><input value={form.account} onChange={e=>setForm({...form,account:e.target.value})}/>
-        <label>{settings.labels.amount}</label><input inputMode="decimal" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value.replace(/[^\d.]/g,"")})}/>
-        <label>{settings.labels.reference}</label><input placeholder="Optional" value={form.reference} onChange={e=>setForm({...form,reference:e.target.value})}/>
-        <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
-          <button className="btn btn-soft" onClick={()=>setBankModal(false)}>Cancel</button>
-          <button className="btn btn-primary" onClick={()=>setBankModal(false)}>Save</button>
-        </div>
-      </div>
-    </div>}
   </main>
 }
