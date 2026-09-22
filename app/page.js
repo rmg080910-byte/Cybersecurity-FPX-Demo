@@ -6,22 +6,25 @@ const money = (v) => `RM ${Number(v||0).toLocaleString("en-MY",{minimumFractionD
 const fmtTime = (v) => v ? new Intl.DateTimeFormat("en-MY",{dateStyle:"medium",timeStyle:"medium",timeZone:"Asia/Kuala_Lumpur"}).format(new Date(v)) : "";
 
 function BankLogo({bank,size=38}) {
-  const initial = String(bank?.name || "B").trim().slice(0,1).toUpperCase();
+  const [broken,setBroken]=useState(false);
+  const src=bank?.logo_data_url;
+
+  if(!src || broken) return null;
+
   return <div style={{
     width:size,height:size,borderRadius:10,background:"#fff",
     border:"1px solid #dfe6ef",display:"grid",placeItems:"center",
     position:"relative",overflow:"hidden",flex:"0 0 auto"
   }}>
-    <span style={{fontWeight:900,fontSize:Math.max(14,Math.round(size*0.38)),color:"#17304f"}}>{initial}</span>
-    {bank?.logo_data_url ? <img
-      src={bank.logo_data_url}
-      alt={`${bank.name} logo`}
-      onError={e=>{e.currentTarget.style.display="none";}}
+    <img
+      src={src}
+      alt={`${bank?.name || "Bank"} logo`}
+      onError={()=>setBroken(true)}
       style={{
-        position:"absolute",inset:0,width:"100%",height:"100%",
+        width:"100%",height:"100%",
         objectFit:"contain",background:"#fff",padding:4
       }}
-    /> : null}
+    />
   </div>;
 }
 
