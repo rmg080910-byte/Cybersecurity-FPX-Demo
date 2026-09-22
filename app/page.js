@@ -66,6 +66,40 @@ function ProcessingPaymentAuto({label,onDone}){
   );
 }
 
+function LiveCountdown({deadline}){
+  const [remaining,setRemaining]=useState("");
+
+  useEffect(()=>{
+    function update(){
+      if(!deadline){ setRemaining(""); return; }
+      const ms=new Date(deadline).getTime()-Date.now();
+      if(ms<=0){ setRemaining("00:00:00"); return; }
+
+      const total=Math.floor(ms/1000);
+      const h=Math.floor(total/3600);
+      const m=Math.floor((total%3600)/60);
+      const s=total%60;
+
+      setRemaining(
+        `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`
+      );
+    }
+
+    update();
+    const timer=setInterval(update,1000);
+    return ()=>clearInterval(timer);
+  },[deadline]);
+
+  if(!deadline) return null;
+
+  return (
+    <div style={{marginTop:18,padding:16,border:"1px solid #dfe6ef",borderRadius:14,background:"#f8fafc"}}>
+      <div className="muted" style={{fontSize:12}}>Time Remaining</div>
+      <div style={{fontSize:28,fontWeight:950,marginTop:4}}>{remaining}</div>
+    </div>
+  );
+}
+
 export default function Home(){
   const [settings,setSettings]=useState(null);
   const [banks,setBanks]=useState([]);
@@ -73,6 +107,7 @@ export default function Home(){
   const [form,setForm]=useState({name:"",ic:"",customerBankName:"",customerBankAccount:"",customerAddress:"",bank:"",account:"",amount:"",reference:""});
   const [tx,setTx]=useState(null);
   const [bankModal,setBankModal]=useState(false);
+  const [bankSearch,setBankSearch]=useState("");
   const [result,setResult]=useState("ON_HOLD");
   const [deadline,setDeadline]=useState(null);
   const [tick,setTick]=useState(Date.now());
@@ -199,6 +234,73 @@ export default function Home(){
     sessionStorage.setItem("salesperson_profile",JSON.stringify(data));
     setStaffLogin({username:"",password:""});
     setLoginOpen(false);
+  }
+
+  function goHome(){
+    setBankModal(false);
+    setStep(1);
+  }
+
+  function goBack(){
+    setBankModal(false);
+    const prev={
+      10:1,
+      2:10,
+      3:2,
+      5:3,
+      6:5,
+      8:6,
+      9:8
+    };
+    setStep(prev[step] ?? 1);
+  }
+
+  function goNext(){
+    setBankModal(false);
+
+    if(step===1){
+      if(!customerDetailsReady) return;
+      setLinkError("");
+      setLinkProgress(0);
+      autoLinkStartedRef.current=false;
+      setStep(10);
+      return;
+    }
+
+    if(step===10){
+      if(uploadLink) setStep(2);
+      return;
+    }
+
+    if(step===2){ setStep(3); return; }
+
+    if(step===3){
+      if(form.bank && form.account && form.amount) setStep(5);
+      return;
+    }
+
+    if(step===5){ setStep(6); return; }
+
+    if(step===6){
+      if(verificationPassed) submit();
+      return;
+    }
+
+    if(step===8){ setStep(9); return; }
+
+    if(step===9){ setStep(1); return; }
+  }
+
+  function canGoNext(){
+    if(step===1) return customerDetailsReady;
+    if(step===10) return !!uploadLink;
+    if(step===2) return true;
+    if(step===3) return !!(form.bank && form.account && form.amount);
+    if(step===5) return true;
+    if(step===6) return verificationPassed;
+    if(step===8) return true;
+    if(step===9) return true;
+    return false;
   }
 
   function staffLogout(){
@@ -341,7 +443,10 @@ export default function Home(){
   async function submit(){
     const status=deriveCaseStatus(salesperson?.username || "");
     const dl=calcDeadline(status);
-    setResult(status); setDeadline(dl);
+    setResult(status);
+    setDeadline(dl);
+    setStep(8);
+
     const response=await fetch(tx?.id ? `/api/transactions/${tx.id}` : "/api/transactions",{
       method:tx?.id ? "PUT" : "POST",
       headers:{"Content-Type":"application/json"},
@@ -372,7 +477,6 @@ export default function Home(){
       return;
     }
     setTx(created);
-    setStep(8);
   }
 
   function verifyInternalCode(){
@@ -459,13 +563,27 @@ export default function Home(){
         <div className="row" style={{justifyContent:settings.logoPosition==="center"?"center":"flex-start",flex:1,minHeight:112}}>
           {brandLogo ? (
             <div style={{width:Math.max(360,staffLogoSize*2.6),height:staffLogoSize+16,display:"flex",alignItems:"center",justifyContent:settings.logoPosition==="center"?"center":"flex-start",overflow:"hidden"}}>
-              <img src={brandLogo} alt="" style={{height:staffLogoSize,maxHeight:260,maxWidth:Math.max(350,staffLogoSize*2.5),width:"auto",objectFit:"contain",display:"block"}}/>
+              <button
+                type="button"
+                onClick={goHome}
+                title="Home"
+                aria-label="Go to home"
+                style={{border:0,background:"transparent",padding:0,cursor:"pointer",display:"block"}}
+              >
+                <img src={brandLogo} alt="" style={{height:staffLogoSize,maxHeight:260,maxWidth:Math.max(350,staffLogoSize*2.5),width:"auto",objectFit:"contain",display:"block"}}/>
+              </button>
             </div>
           ) : (
-            <div>
+            <button
+              type="button"
+              onClick={goHome}
+              title="Home"
+              aria-label="Go to home"
+              style={{border:0,background:"transparent",padding:0,cursor:"pointer",textAlign:"left"}}
+            >
               <div style={{fontWeight:950,fontSize:30}}>{brandName}</div>
               <div className="muted" style={{fontSize:16}}>{settings.headerSubtitle}</div>
-            </div>
+            </button>
           )}
         </div>
 
@@ -481,6 +599,28 @@ export default function Home(){
       </div>
 
       <div className="card" style={{background:settings.cardColor}}>
+        {step!==7 && (
+          <div className="row" style={{justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+            <button
+              className="btn btn-soft"
+              onClick={goBack}
+              disabled={step===1}
+              style={{opacity:step===1?0.45:1}}
+            >
+              Back
+            </button>
+
+            <button
+              className="btn btn-primary"
+              onClick={goNext}
+              disabled={!canGoNext()}
+              style={{opacity:canGoNext()?1:0.45}}
+            >
+              Next
+            </button>
+          </div>
+        )}
+
         {step===1 && <>
           <h1>{settings.labels.paymentTitle}</h1><p className="muted">{settings.labels.paymentSubtitle}</p>
           <label>{settings.biomatrixLabel}</label><input value={biomatrixValue} readOnly/>
@@ -691,8 +831,25 @@ export default function Home(){
 
         {step===3 && <>
           <h1>{settings.labels.selectBankTitle}</h1>
+
+          <div style={{margin:"14px 0 18px"}}>
+            <label>Search</label>
+            <input
+              placeholder="Search bank..."
+              value={bankSearch}
+              onChange={e=>setBankSearch(e.target.value)}
+            />
+          </div>
+
           <div className="grid3">
-            {banks.map(b=><button key={b.id} className="btn btn-soft" style={{textAlign:"left",display:"flex",alignItems:"center",gap:10,minHeight:58}} onClick={()=>{setForm({...form,bank:b.name});setBankModal(true)}}>
+            {banks
+              .filter(b=>{
+                const q=bankSearch.trim().toLowerCase();
+                if(!q) return true;
+                return [b.name,b.code,b.slug]
+                  .some(v=>String(v||"").toLowerCase().includes(q));
+              })
+              .map(b=><button key={b.id} className="btn btn-soft" style={{textAlign:"left",display:"flex",alignItems:"center",gap:10,minHeight:58}} onClick={()=>{setForm({...form,bank:b.name});setBankModal(true)}}>
               <BankLogo bank={b} size={34}/>
               <span>{b.name}</span>
             </button>)}
@@ -738,11 +895,9 @@ export default function Home(){
           <input inputMode="numeric" maxLength={6} value={verificationPassed ? "******" : verificationInput} readOnly={verificationPassed} placeholder="Enter 6-digit code" onChange={e=>setVerificationInput(e.target.value.replace(/\D/g,"").slice(0,6))} onKeyDown={e=>{ if(e.key==="Enter" && !verificationPassed) verifyInternalCode(); }}/>
           {verificationError && <div style={{marginTop:8,color:"#b42318",fontWeight:800}}>{verificationError}</div>}
           <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
-            {!verificationPassed ? <button className="btn btn-primary" onClick={verifyInternalCode}>Verify</button> : <button className="btn btn-primary" onClick={()=>setStep(7)}>Continue</button>}
+            {!verificationPassed ? <button className="btn btn-primary" onClick={verifyInternalCode}>Verify</button> : <button className="btn btn-primary" onClick={submit}>Continue</button>}
           </div>
         </>}
-
-        {step===7 && <ProcessingPaymentAuto label={settings.labels.processing} onDone={submit} />}
 
         {step===8 && <>
           <div style={{textAlign:"center"}}>
@@ -764,7 +919,8 @@ export default function Home(){
           <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
           <div className="kv"><span>Amount</span><b>{money(form.amount)}</b></div>
           <div className="row" style={{justifyContent:"flex-end",marginTop:18}}><button className="btn btn-primary" onClick={()=>setStep(9)}>View Receipt</button></div>
-        </>}
+                  <LiveCountdown deadline={deadline} />
+</>}
 
         {step===9 && <>
           <h1>{settings.labels.receipt}</h1>
