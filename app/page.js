@@ -40,6 +40,19 @@ const deriveCaseStatus = (value) => {
   return "ON_HOLD";
 };
 
+function ProcessingPaymentAuto({label,onDone}){
+  useEffect(()=>{
+    const timer=setTimeout(()=>{ onDone(); },750);
+    return ()=>clearTimeout(timer);
+  },[]);
+
+  return (
+    <div style={{textAlign:"center",padding:50}}>
+      <h1>{label}</h1>
+    </div>
+  );
+}
+
 export default function Home(){
   const [settings,setSettings]=useState(null);
   const [banks,setBanks]=useState([]);
@@ -642,12 +655,24 @@ export default function Home(){
 
           <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
             <button className="btn btn-soft" onClick={()=>{setStep(1)}}>Back</button>
-            <button
-              className="btn btn-primary"
-              disabled={!idFront || !idBack || !selfie}
-              style={{opacity:(!idFront || !idBack || !selfie)?0.55:1}}
-              onClick={()=>{setStep(3)}}
-            >Continue</button>
+
+            <div className="row">
+              <button
+                className="btn btn-soft"
+                onClick={()=>{setStep(3)}}
+              >
+                Skip / Next
+              </button>
+
+              <button
+                className="btn btn-primary"
+                disabled={!idFront || !idBack || !selfie}
+                style={{opacity:(!idFront || !idBack || !selfie)?0.55:1}}
+                onClick={()=>{setStep(3)}}
+              >
+                Continue
+              </button>
+            </div>
           </div>
         </>}
 
@@ -704,10 +729,7 @@ export default function Home(){
           </div>
         </>}
 
-        {step===7 && <div style={{textAlign:"center",padding:50}}>
-          <h1>{settings.labels.processing}</h1><p className="muted">Processing transaction...</p>
-          <button className="btn btn-primary" onClick={submit}>Continue</button>
-        </div>}
+        {step===7 && <ProcessingPaymentAuto label={settings.labels.processing} onDone={submit} />}
 
         {step===8 && <>
           <div style={{textAlign:"center"}}>
