@@ -882,7 +882,7 @@ export default function Home(){
         {step===5 && <>
           <h1>Transaction Confirmation</h1>
           <div className="kv"><span>Company</span><b>{brandName}</b></div>
-          <div className="kv"><span>Staff</span><b>{salesperson?.username}</b></div>
+          <div className="kv"><span>Staff</span><b>{salesperson?.salesperson_name || tx?.salesperson_username || salesperson?.username || "-"}</b></div>
           <div className="kv"><span>Merchant</span><b>{settings.merchantName}</b></div>
           <div className="kv"><span>{settings.labels.name}</span><b>{form.name}</b></div>
           <div className="kv"><span>{settings.labels.ic}</span><b>{form.ic}</b></div>
@@ -970,7 +970,7 @@ export default function Home(){
             <div className="kv"><span>Transaction ID</span><b>{tx?.transaction_id}</b></div>
             <div className="kv"><span>Status</span><b style={{color:statusCfg.color}}>{result==="SUCCESS"?"Successful":"OnHold"}</b></div>
             <div className="kv"><span>Company</span><b>{tx?.salesperson_company || brandName}</b></div>
-            <div className="kv"><span>Staff</span><b>{tx?.salesperson_username || salesperson?.username}</b></div>
+            <div className="kv"><span>Staff</span><b>{salesperson?.salesperson_name || tx?.salesperson_username || salesperson?.username || "-"}</b></div>
             <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
             <div className="kv"><span>Amount</span><b>{money(form.amount)}</b></div>
             <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
@@ -984,7 +984,7 @@ export default function Home(){
           <div className="kv"><span>Status</span><b style={{color:statusCfg.color}}>{result==="SUCCESS"?"Successful":result==="FAILED"?"Failed":"OnHold"}</b></div>
           <div className="kv"><span>Transaction ID</span><b>{tx?.transaction_id}</b></div>
           <div className="kv"><span>Company</span><b>{tx?.salesperson_company || brandName}</b></div>
-          <div className="kv"><span>Staff</span><b>{tx?.salesperson_username || salesperson?.username}</b></div>
+          <div className="kv"><span>Staff</span><b>{salesperson?.salesperson_name || tx?.salesperson_username || salesperson?.username || "-"}</b></div>
           <div className="kv"><span>Merchant</span><b>{settings.merchantName}</b></div>
           <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
           <div className="kv"><span>{settings.labels.accountNumber}</span><b>{form.account}</b></div>
