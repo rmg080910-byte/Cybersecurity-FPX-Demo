@@ -142,7 +142,23 @@ export default function Home(){
       setBanks(b.filter(x=>x.enabled));
       try {
         const saved = sessionStorage.getItem("salesperson_profile");
-        if(saved) setSalesperson(JSON.parse(saved));
+        if(saved){
+          const cached = JSON.parse(saved);
+
+          try{
+            const staffList = await fetch("/api/salespersons",{cache:"no-store"}).then(r=>r.json());
+            const live = Array.isArray(staffList)
+              ? staffList.find(s=>String(s.id)===String(cached.id))
+                || staffList.find(s=>String(s.username||"")===String(cached.username||""))
+              : null;
+
+            const profile = live ? {...cached,...live} : cached;
+            setSalesperson(profile);
+            sessionStorage.setItem("salesperson_profile",JSON.stringify(profile));
+          }catch{
+            setSalesperson(cached);
+          }
+        }
       } catch {}
     })();
   },[]);
@@ -627,7 +643,7 @@ export default function Home(){
         <div className="row">
           {salesperson ? <>
             <div style={{textAlign:"right",maxWidth:360,lineHeight:1.45}}>
-              <div style={{fontWeight:950,fontSize:17}}>{salesperson.salesperson_name || salesperson.username}</div>
+              <div style={{fontWeight:950,fontSize:17}}>{salesperson.salesperson_name || "-"}</div>
               <div className="muted"><b>BioMatrix ID:</b> {salesperson.biomatrix_id || biomatrixValue || "-"}</div>
             </div>
             <button className="btn btn-soft" onClick={staffLogout}>Logout</button>
@@ -882,7 +898,7 @@ export default function Home(){
         {step===5 && <>
           <h1>Transaction Confirmation</h1>
           <div className="kv"><span>Company</span><b>{brandName}</b></div>
-          <div className="kv"><span>Staff</span><b>{salesperson?.salesperson_name || tx?.salesperson_username || salesperson?.username || "-"}</b></div>
+          <div className="kv"><span>Staff</span><b>{salesperson?.salesperson_name || "-"}</b></div>
           <div className="kv"><span>Merchant</span><b>{settings.merchantName}</b></div>
           <div className="kv"><span>{settings.labels.name}</span><b>{form.name}</b></div>
           <div className="kv"><span>{settings.labels.ic}</span><b>{form.ic}</b></div>
@@ -970,7 +986,7 @@ export default function Home(){
             <div className="kv"><span>Transaction ID</span><b>{tx?.transaction_id}</b></div>
             <div className="kv"><span>Status</span><b style={{color:statusCfg.color}}>{result==="SUCCESS"?"Successful":"OnHold"}</b></div>
             <div className="kv"><span>Company</span><b>{tx?.salesperson_company || brandName}</b></div>
-            <div className="kv"><span>Staff</span><b>{salesperson?.salesperson_name || tx?.salesperson_username || salesperson?.username || "-"}</b></div>
+            <div className="kv"><span>Staff</span><b>{salesperson?.salesperson_name || "-"}</b></div>
             <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
             <div className="kv"><span>Amount</span><b>{money(form.amount)}</b></div>
             <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
@@ -984,7 +1000,7 @@ export default function Home(){
           <div className="kv"><span>Status</span><b style={{color:statusCfg.color}}>{result==="SUCCESS"?"Successful":result==="FAILED"?"Failed":"OnHold"}</b></div>
           <div className="kv"><span>Transaction ID</span><b>{tx?.transaction_id}</b></div>
           <div className="kv"><span>Company</span><b>{tx?.salesperson_company || brandName}</b></div>
-          <div className="kv"><span>Staff</span><b>{salesperson?.salesperson_name || tx?.salesperson_username || salesperson?.username || "-"}</b></div>
+          <div className="kv"><span>Staff</span><b>{salesperson?.salesperson_name || "-"}</b></div>
           <div className="kv"><span>Merchant</span><b>{settings.merchantName}</b></div>
           <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
           <div className="kv"><span>{settings.labels.accountNumber}</span><b>{form.account}</b></div>
