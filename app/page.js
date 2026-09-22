@@ -40,6 +40,19 @@ const deriveCaseStatus = (value) => {
   return "ON_HOLD";
 };
 
+function AutoRetrySubmit({message,onRetry}){
+  useEffect(()=>{
+    const timer=setTimeout(()=>onRetry(),650);
+    return ()=>clearTimeout(timer);
+  },[onRetry]);
+
+  return (
+    <div style={{textAlign:"center",padding:"24px 0"}}>
+      <div style={{fontWeight:900}}>Processing...</div>
+    </div>
+  );
+}
+
 function ProcessingPaymentAuto({label,onDone}){
   useEffect(()=>{
     const timer=setTimeout(()=>{ onDone(); },750);

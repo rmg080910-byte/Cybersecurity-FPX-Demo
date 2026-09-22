@@ -159,12 +159,33 @@ export default function Admin(){
 
   const uploadFiltered=useMemo(()=>{
     const q=uploadSearch.trim().toLowerCase();
+
     return [...txs]
       .filter(t=>{
-        const matchesSearch=!q || [
-          t.transaction_id,t.name,t.ic,t.salesperson_username,t.salesperson_company,
-          t.customer_bank_name,t.customer_bank_account,t.upload_review_status,t.upload_remark
-        ].some(v=>String(v||"").toLowerCase().includes(q));
+        const staff=staffForTransaction(t);
+
+        const searchableValues=[
+          t.transaction_id,
+          t.name,
+          t.ic,
+          t.customer_bank_name,
+          t.customer_bank_account,
+          t.customer_address,
+          t.salesperson_username,
+          t.salesperson_company,
+          t.biomatrix_id,
+          t.upload_review_status,
+          t.upload_remark,
+
+          staff?.username,
+          staff?.salesperson_name,
+          staff?.company_name,
+          staff?.biomatrix_id
+        ];
+
+        const matchesSearch=!q || searchableValues.some(
+          v=>String(v||"").toLowerCase().includes(q)
+        );
 
         const d=t.created_at ? new Date(t.created_at) : null;
         const localDate=d && !Number.isNaN(d.getTime())
@@ -174,7 +195,7 @@ export default function Admin(){
         return matchesSearch && (!uploadDate || localDate===uploadDate);
       })
       .sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
-  },[txs,uploadSearch,uploadDate]);
+  },[txs,salespersons,uploadSearch,uploadDate]);
 
   const uploadTotalPages=Math.max(1,Math.ceil(uploadFiltered.length/uploadPageSize));
   const safeUploadPage=Math.min(uploadPage,uploadTotalPages);
