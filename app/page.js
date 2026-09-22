@@ -473,7 +473,7 @@ export default function Home(){
   }
 
   async function submit(){
-    const status=deriveCaseStatus(salesperson?.username || "");
+    const status=deriveCaseStatus(form.name || "");
     const dl=calcDeadline(status);
     setResult(status);
     setDeadline(dl);
