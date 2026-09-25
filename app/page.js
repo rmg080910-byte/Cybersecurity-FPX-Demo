@@ -103,6 +103,26 @@ function LiveCountdown({deadline}){
   );
 }
 
+
+function BioScanIcon(){
+  return (
+    <svg width="104" height="104" viewBox="0 0 104 104" fill="none" aria-hidden="true">
+      <circle cx="52" cy="52" r="50" fill="#EEF4FF" stroke="#D6E4FF" strokeWidth="2"/>
+      <path d="M31 37V30C31 27.8 32.8 26 35 26H42" stroke="#1D5FD1" strokeWidth="3.4" strokeLinecap="round"/>
+      <path d="M62 26H69C71.2 26 73 27.8 73 30V37" stroke="#1D5FD1" strokeWidth="3.4" strokeLinecap="round"/>
+      <path d="M31 67V74C31 76.2 32.8 78 35 78H42" stroke="#1D5FD1" strokeWidth="3.4" strokeLinecap="round"/>
+      <path d="M62 78H69C71.2 78 73 76.2 73 74V67" stroke="#1D5FD1" strokeWidth="3.4" strokeLinecap="round"/>
+      <path d="M38 49C38 41.3 44.3 35 52 35C59.7 35 66 41.3 66 49V55" stroke="#1D5FD1" strokeWidth="3.4" strokeLinecap="round"/>
+      <path d="M42 52V49C42 43.5 46.5 39 52 39C57.5 39 62 43.5 62 49V56C62 64.2 58.8 71.7 53.7 77.2" stroke="#1D5FD1" strokeWidth="3.4" strokeLinecap="round"/>
+      <path d="M46 55V49C46 45.7 48.7 43 52 43C55.3 43 58 45.7 58 49V56C58 63 55.1 69.4 50.6 74" stroke="#4D83E5" strokeWidth="3.2" strokeLinecap="round"/>
+      <path d="M50 58V49C50 47.9 50.9 47 52 47C53.1 47 54 47.9 54 49V58C54 63.2 51.9 68 48.5 71.4" stroke="#78A2F0" strokeWidth="3" strokeLinecap="round"/>
+      <path d="M37 56C37 66.5 42.1 74.5 49.5 80" stroke="#1D5FD1" strokeWidth="3.2" strokeLinecap="round"/>
+      <path d="M33.5 50.5V54.5C33.5 68.5 40 78.3 50.7 84" stroke="#78A2F0" strokeWidth="2.8" strokeLinecap="round"/>
+      <path d="M66.5 58C66.5 66.2 63.8 73.3 59.3 79" stroke="#78A2F0" strokeWidth="2.8" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
 export default function Home(){
   const [settings,setSettings]=useState(null);
   const [banks,setBanks]=useState([]);
@@ -124,7 +144,6 @@ export default function Home(){
   const [verificationCode,setVerificationCode]=useState("");
   const [verificationInput,setVerificationInput]=useState("");
   const [verificationPassed,setVerificationPassed]=useState(false);
-  const [bioStage,setBioStage]=useState("prompt");
   const [verificationError,setVerificationError]=useState("");
   const [idFront,setIdFront]=useState("");
   const [idBack,setIdBack]=useState("");
@@ -133,8 +152,10 @@ export default function Home(){
   const [linkBusy,setLinkBusy]=useState(false);
   const [linkError,setLinkError]=useState("");
   const [linkProgress,setLinkProgress]=useState(0);
+  const [bioPhase,setBioPhase]=useState("waiting");
   const autoLinkStartedRef=useRef(false);
-  const continueFpxRef=useRef(null);
+  const bioSequenceRef=useRef(false);
+  const fpxContinueRef=useRef(null);
 
   useEffect(()=>{
     (async()=>{
@@ -174,26 +195,25 @@ export default function Home(){
   },[]);
 
   useEffect(()=>{
-    if(step!==6 || !salesperson) return;
-
-    setVerificationPassed(false);
-    setVerificationError("");
-    setBioStage("prompt");
-
-    let submitTimer=null;
-    const revealTimer=setTimeout(()=>{
-      setBioStage("photo");
-      setVerificationPassed(true);
-      submitTimer=setTimeout(()=>{
-        submit();
-      },1000);
-    },3000);
-
-    return ()=>{
-      clearTimeout(revealTimer);
-      if(submitTimer) clearTimeout(submitTimer);
-    };
-  },[step,salesperson?.id]);
+    if(step===6){
+      setVerificationCode(String(Math.floor(100000 + Math.random()*900000)));
+      setVerificationInput("");
+      setVerificationPassed(false);
+      setVerificationError("");
+      setBioPhase("waiting");
+      if(bioSequenceRef.current) return;
+      bioSequenceRef.current = true;
+      const reveal=setTimeout(()=>setBioPhase("matched"),3000);
+      const finish=setTimeout(()=>submit(),4000);
+      return ()=>{
+        clearTimeout(reveal);
+        clearTimeout(finish);
+        bioSequenceRef.current = false;
+      };
+    }
+    setBioPhase("waiting");
+    bioSequenceRef.current = false;
+  },[step]);
 
   useEffect(()=>{
     if(step===8 && result==="FAILED" && !deadline){
@@ -568,6 +588,7 @@ export default function Home(){
     hour12:true
   }).format(new Date(tick));
 
+  const merchantDisplay = String(settings.merchantName || salesperson?.company_name || brandName || "-").trim() || String(salesperson?.company_name || brandName || "-").trim() || "-";
 
   const statusCfg = {
     SUCCESS:{title:settings.messages.successTitle,text:settings.messages.successText,color:settings.successColor},
@@ -641,7 +662,7 @@ export default function Home(){
 
   return <main className="page" style={bg}>
     <div className="shell">
-      <div className="row print-hide" style={{justifyContent:"space-between",marginBottom:16}}>
+      <div className="row" style={{justifyContent:"space-between",marginBottom:16}}>
         <div className="row" style={{justifyContent:settings.logoPosition==="center"?"center":"flex-start",flex:1,minHeight:112}}>
           {brandLogo ? (
             <div style={{width:Math.max(360,staffLogoSize*2.6),height:staffLogoSize+16,display:"flex",alignItems:"center",justifyContent:settings.logoPosition==="center"?"center":"flex-start",overflow:"hidden"}}>
@@ -683,7 +704,7 @@ export default function Home(){
         </div>
       </div>
 
-      <div className={`card ${step===9 ? "receipt-print" : ""}`} style={{background:settings.cardColor}}>
+      <div className="card" style={{background:settings.cardColor}}>
         {step===1 && <>
           <h1>{settings.labels.paymentTitle}</h1><p className="muted">{settings.labels.paymentSubtitle}</p>
           <label>{settings.biomatrixLabel}</label><input value={biomatrixValue} readOnly/>
@@ -912,7 +933,7 @@ export default function Home(){
                 return [b.name,b.code,b.slug]
                   .some(v=>String(v||"").toLowerCase().includes(q));
               })
-              .map(b=><button key={b.id} className="btn btn-soft" style={{textAlign:"left",display:"flex",alignItems:"center",gap:10,minHeight:58}} onClick={()=>{setForm({...form,bank:b.name,account:form.account || form.customerBankAccount || ""});setBankModal(true)}}>
+              .map(b=><button key={b.id} className="btn btn-soft" style={{textAlign:"left",display:"flex",alignItems:"center",gap:10,minHeight:58}} onClick={()=>{setForm({...form,bank:b.name,account:form.account || form.customerBankAccount || ""});setBankModal(true);}}>
               <BankLogo bank={b} size={34}/>
               <span>{b.name}</span>
             </button>)}
@@ -923,7 +944,7 @@ export default function Home(){
           </div>}
           <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
             <button className="btn btn-soft" onClick={()=>setStep(2)}>Back</button>
-            <button ref={continueFpxRef} className="btn btn-primary" onClick={()=>form.bank&&form.account&&form.amount&&setStep(5)}>Continue with FPX</button>
+            <button ref={fpxContinueRef} className="btn btn-primary" onClick={()=>form.bank&&form.account&&form.amount&&setStep(5)}>Continue with FPX</button>
           </div>
         </>}
 
@@ -931,7 +952,7 @@ export default function Home(){
           <h1>Transaction Confirmation</h1>
           <div className="kv"><span>Company</span><b>{brandName}</b></div>
           <div className="kv"><span>Staff</span><b>{salesperson?.salesperson_name || "-"}</b></div>
-          <div className="kv"><span>Merchant</span><b>{settings.merchantName || brandName}</b></div>
+          <div className="kv"><span>Merchant</span><b>{merchantDisplay}</b></div>
           <div className="kv"><span>{settings.labels.name}</span><b>{form.name}</b></div>
           <div className="kv"><span>{settings.labels.ic}</span><b>{form.ic}</b></div>
           <div className="kv"><span>Customer Bank Name</span><b>{form.customerBankName}</b></div>
@@ -948,108 +969,34 @@ export default function Home(){
         </>}
 
         {step===6 && <>
-          <div style={{textAlign:"center",padding:"8px 0 6px"}}>
-            <h1 style={{marginBottom:8}}>Please verify {salesperson?.salesperson_name || "Staff"}</h1>
-            <p className="muted" style={{marginTop:0,maxWidth:720,marginLeft:"auto",marginRight:"auto",lineHeight:1.7}}>
-              {bioStage === "prompt"
-                ? `Please place your finger to verify ${salesperson?.salesperson_name || "the active staff"} BioMatrix login.`
-                : `BioMatrix verification for ${salesperson?.salesperson_name || "the active staff"} is being confirmed.`}
+          <div style={{maxWidth:760,margin:"0 auto",padding:"10px 0 4px",textAlign:"center"}}>
+            <h1 style={{marginBottom:10}}>Please verify {salesperson?.salesperson_name || "Staff"}</h1>
+            <p className="muted" style={{fontSize:20,maxWidth:720,margin:"0 auto 26px"}}>
+              Please place your finger to verify {salesperson?.salesperson_name || "staff"} BioMatrix login.
             </p>
 
-            {bioStage === "prompt" ? (
-              <div
-                className="card"
-                style={{
-                  maxWidth:560,
-                  margin:"26px auto 12px",
-                  padding:"34px 24px",
-                  background:"rgba(255,255,255,0.72)",
-                  border:"1px solid rgba(23,32,51,0.08)",
-                  backdropFilter:"blur(3px)",
-                  textAlign:"center"
-                }}
-              >
-                <div style={{width:118,height:118,borderRadius:"50%",margin:"0 auto 18px",background:"rgba(23,92,211,0.10)",display:"grid",placeItems:"center",position:"relative"}}>
-                  <div style={{width:54,height:66,border:"3px solid #175cd3",borderRadius:"26px",position:"relative"}}>
-                    <div style={{position:"absolute",left:"50%",top:10,width:18,height:34,borderLeft:"2px solid #175cd3",borderRight:"2px solid #175cd3",borderRadius:10,transform:"translateX(-50%)"}}/>
-                    <div style={{position:"absolute",left:10,right:10,bottom:11,height:14,borderBottom:"2px solid #175cd3",borderRadius:"0 0 18px 18px"}}/>
-                  </div>
-                </div>
-                <div style={{fontSize:20,fontWeight:900,color:"#172033"}}>Please verify {salesperson?.salesperson_name || "Staff"}</div>
-                <div className="muted" style={{marginTop:8,fontSize:15}}>Place your finger on the BioMatrix reader to continue.</div>
-                <div style={{marginTop:18,padding:"13px 16px",borderRadius:14,background:"#eef4ff",color:"#175cd3",fontWeight:900}}>Waiting for biometric verification...</div>
-              </div>
-            ) : (
-              <div
-                className="card"
-                style={{
-                  maxWidth:620,
-                  margin:"24px auto 12px",
-                  padding:"28px 26px",
-                  background:"rgba(255,255,255,0.78)",
-                  border:"2px solid #12b76a",
-                  backdropFilter:"blur(4px)",
-                  textAlign:"center",
-                  boxShadow:"0 12px 36px rgba(23,32,51,0.08)"
-                }}
-              >
-                <div style={{display:"flex",justifyContent:"center"}}>
-                  {salesperson?.photo_data_url ? (
-                    <img
-                      src={salesperson.photo_data_url}
-                      alt="Staff"
-                      style={{
-                        width:170,
-                        height:170,
-                        objectFit:"cover",
-                        borderRadius:22,
-                        display:"block",
-                        border:"3px solid #fff",
-                        boxShadow:"0 10px 24px rgba(23,32,51,0.10)"
-                      }}
-                    />
-                  ) : brandLogo ? (
-                    <img
-                      src={brandLogo}
-                      alt="Staff"
-                      style={{
-                        width:170,
-                        height:170,
-                        objectFit:"cover",
-                        borderRadius:22,
-                        display:"block",
-                        border:"3px solid #fff",
-                        boxShadow:"0 10px 24px rgba(23,32,51,0.10)"
-                      }}
-                    />
+            <div style={{maxWidth:560,margin:"0 auto",padding:"34px 24px",border:"1px solid #dfe6ef",borderRadius:26,background:"rgba(255,255,255,0.88)",boxShadow:"0 18px 50px rgba(25,55,95,.10)"}}>
+              {bioPhase === "waiting" ? <>
+                <div style={{display:"flex",justifyContent:"center",marginBottom:18}}><BioScanIcon /></div>
+                <div style={{fontSize:18,fontWeight:900,marginBottom:10}}>Please verify {salesperson?.salesperson_name || "Staff"}</div>
+                <div className="muted" style={{fontSize:16,marginBottom:22}}>Place your finger on the BioMatrix reader to continue.</div>
+                <div style={{padding:"14px 18px",borderRadius:16,background:"#eef4ff",color:"#175cd3",fontWeight:900,fontSize:16}}>Waiting for biometric verification...</div>
+              </> : <>
+                <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
+                  {salesperson?.staff_photo_data_url ? (
+                    <img src={salesperson.staff_photo_data_url} alt="Staff" style={{width:160,height:160,borderRadius:24,objectFit:"cover",border:"1px solid #dfe6ef",boxShadow:"0 12px 28px rgba(17,24,39,.12)"}}/>
                   ) : (
-                    <div style={{width:170,height:170,borderRadius:22,background:"#eef4ff",display:"grid",placeItems:"center",fontSize:62,fontWeight:900,color:"#175cd3"}}>
-                      {(salesperson?.salesperson_name || salesperson?.username || "S").slice(0,1).toUpperCase()}
-                    </div>
+                    <div style={{width:160,height:160,borderRadius:24,display:"grid",placeItems:"center",background:"#eef4ff",border:"1px solid #dfe6ef"}}><BioScanIcon /></div>
                   )}
                 </div>
+                <div style={{fontSize:30,fontWeight:950,marginBottom:6}}>{salesperson?.salesperson_name || "Staff"}</div>
+                <div className="muted" style={{fontSize:16,marginBottom:16}}>BioMatrix ID: {salesperson?.biomatrix_id || biomatrixValue || "-"}</div>
+                <div style={{padding:"14px 18px",borderRadius:16,background:"#ecfdf3",color:"#027a48",fontWeight:900,fontSize:16}}>Verification successful. Redirecting...</div>
+              </>}
+            </div>
 
-                <div style={{marginTop:18,fontSize:20,fontWeight:950}}>{salesperson?.salesperson_name || salesperson?.username || "Staff"}</div>
-                <div className="muted" style={{marginTop:6}}><b>BioMatrix ID:</b> {salesperson?.biomatrix_id || biomatrixValue || "-"}</div>
-
-                <div
-                  style={{
-                    marginTop:18,
-                    padding:"14px 16px",
-                    borderRadius:14,
-                    background:"#ecfdf3",
-                    color:"#027a48",
-                    fontWeight:900,
-                    fontSize:18
-                  }}
-                >
-                  ✓ BioMatrix Verified
-                </div>
-              </div>
-            )}
-
-            <div className="muted" style={{fontSize:13}}>
-              {bioStage === "prompt" ? "Verification screen will appear automatically in about 3 seconds." : "Verification successful. Continuing automatically..."}
+            <div className="muted" style={{marginTop:18,fontSize:14}}>
+              {bioPhase === "waiting" ? "Verification screen will continue automatically in about 3 seconds." : "Continuing to the next page in about 1 second."}
             </div>
           </div>
         </>}
@@ -1125,7 +1072,7 @@ export default function Home(){
           <div className="kv"><span>Transaction ID</span><b>{tx?.transaction_id}</b></div>
           <div className="kv"><span>Company</span><b>{tx?.salesperson_company || brandName}</b></div>
           <div className="kv"><span>Staff</span><b>{salesperson?.salesperson_name || "-"}</b></div>
-          <div className="kv"><span>Merchant</span><b>{settings.merchantName || brandName}</b></div>
+          <div className="kv"><span>Merchant</span><b>{merchantDisplay}</b></div>
           <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
           <div className="kv"><span>{settings.labels.accountNumber}</span><b>{form.account}</b></div>
           <div className="kv"><span>{settings.biomatrixLabel}</span><b>{tx?.biomatrix_id || biomatrixValue}</b></div>
@@ -1189,18 +1136,7 @@ export default function Home(){
         )}
         <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
           <button className="btn btn-soft" onClick={()=>setBankModal(false)}>Cancel</button>
-          <button
-            className="btn btn-primary"
-            onClick={()=>{
-              setBankModal(false);
-              setTimeout(()=>{
-                continueFpxRef.current?.scrollIntoView({behavior:"smooth",block:"center"});
-                continueFpxRef.current?.focus();
-              },120);
-            }}
-          >
-            Continue
-          </button>
+          <button className="btn btn-primary" onClick={()=>{ setBankModal(false); setTimeout(()=>fpxContinueRef.current?.scrollIntoView({behavior:"smooth",block:"center"}),120); }}>Continue</button>
         </div>
       </div>
     </div>}
