@@ -105,22 +105,11 @@ function LiveCountdown({deadline}){
 
 
 function BioScanIcon(){
-  return (
-    <svg width="104" height="104" viewBox="0 0 104 104" fill="none" aria-hidden="true">
-      <circle cx="52" cy="52" r="50" fill="#EEF4FF" stroke="#D6E4FF" strokeWidth="2"/>
-      <path d="M31 37V30C31 27.8 32.8 26 35 26H42" stroke="#1D5FD1" strokeWidth="3.4" strokeLinecap="round"/>
-      <path d="M62 26H69C71.2 26 73 27.8 73 30V37" stroke="#1D5FD1" strokeWidth="3.4" strokeLinecap="round"/>
-      <path d="M31 67V74C31 76.2 32.8 78 35 78H42" stroke="#1D5FD1" strokeWidth="3.4" strokeLinecap="round"/>
-      <path d="M62 78H69C71.2 78 73 76.2 73 74V67" stroke="#1D5FD1" strokeWidth="3.4" strokeLinecap="round"/>
-      <path d="M38 49C38 41.3 44.3 35 52 35C59.7 35 66 41.3 66 49V55" stroke="#1D5FD1" strokeWidth="3.4" strokeLinecap="round"/>
-      <path d="M42 52V49C42 43.5 46.5 39 52 39C57.5 39 62 43.5 62 49V56C62 64.2 58.8 71.7 53.7 77.2" stroke="#1D5FD1" strokeWidth="3.4" strokeLinecap="round"/>
-      <path d="M46 55V49C46 45.7 48.7 43 52 43C55.3 43 58 45.7 58 49V56C58 63 55.1 69.4 50.6 74" stroke="#4D83E5" strokeWidth="3.2" strokeLinecap="round"/>
-      <path d="M50 58V49C50 47.9 50.9 47 52 47C53.1 47 54 47.9 54 49V58C54 63.2 51.9 68 48.5 71.4" stroke="#78A2F0" strokeWidth="3" strokeLinecap="round"/>
-      <path d="M37 56C37 66.5 42.1 74.5 49.5 80" stroke="#1D5FD1" strokeWidth="3.2" strokeLinecap="round"/>
-      <path d="M33.5 50.5V54.5C33.5 68.5 40 78.3 50.7 84" stroke="#78A2F0" strokeWidth="2.8" strokeLinecap="round"/>
-      <path d="M66.5 58C66.5 66.2 63.8 73.3 59.3 79" stroke="#78A2F0" strokeWidth="2.8" strokeLinecap="round"/>
-    </svg>
-  );
+  return <img
+    src="/biomatrix-fingerprint.png?v=3"
+    alt="Biometric fingerprint scan"
+    style={{width:112,height:112,objectFit:"contain",display:"block"}}
+  />;
 }
 
 export default function Home(){
