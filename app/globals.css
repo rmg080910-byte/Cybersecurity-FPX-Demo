@@ -23,3 +23,49 @@ input,select,textarea{width:100%;padding:12px 14px;border:1px solid #cbd6e3;bord
 .modalBack{position:fixed;inset:0;background:rgba(0,0,0,.38);display:grid;place-items:center;padding:18px;z-index:99}
 .modal{width:min(640px,96vw);max-height:90vh;overflow:auto;background:#fff;border-radius:22px;padding:22px}
 @media(max-width:720px){.grid2,.grid3{grid-template-columns:1fr}.page{padding:12px}.table{font-size:12px}}
+
+
+@media print{
+  @page{
+    size:auto;
+    margin:0;
+  }
+
+  html,body{
+    margin:0 !important;
+    padding:0 !important;
+    background:#fff !important;
+  }
+
+  body *{
+    visibility:hidden !important;
+  }
+
+  .receipt-print,
+  .receipt-print *{
+    visibility:visible !important;
+  }
+
+  .receipt-print{
+    position:absolute !important;
+    left:0 !important;
+    top:0 !important;
+    width:100% !important;
+    max-width:none !important;
+    margin:0 !important;
+    padding:24px !important;
+    border:0 !important;
+    border-radius:0 !important;
+    box-shadow:none !important;
+    background:#fff !important;
+  }
+
+  .receipt-print .btn,
+  .print-hide{
+    display:none !important;
+  }
+
+  .receipt-print .kv{
+    break-inside:avoid;
+  }
+}

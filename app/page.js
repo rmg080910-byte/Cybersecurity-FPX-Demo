@@ -641,7 +641,7 @@ export default function Home(){
 
   return <main className="page" style={bg}>
     <div className="shell">
-      <div className="row" style={{justifyContent:"space-between",marginBottom:16}}>
+      <div className="row print-hide" style={{justifyContent:"space-between",marginBottom:16}}>
         <div className="row" style={{justifyContent:settings.logoPosition==="center"?"center":"flex-start",flex:1,minHeight:112}}>
           {brandLogo ? (
             <div style={{width:Math.max(360,staffLogoSize*2.6),height:staffLogoSize+16,display:"flex",alignItems:"center",justifyContent:settings.logoPosition==="center"?"center":"flex-start",overflow:"hidden"}}>
@@ -683,7 +683,7 @@ export default function Home(){
         </div>
       </div>
 
-      <div className="card" style={{background:settings.cardColor}}>
+      <div className={`card ${step===9 ? "receipt-print" : ""}`} style={{background:settings.cardColor}}>
         {step===1 && <>
           <h1>{settings.labels.paymentTitle}</h1><p className="muted">{settings.labels.paymentSubtitle}</p>
           <label>{settings.biomatrixLabel}</label><input value={biomatrixValue} readOnly/>
