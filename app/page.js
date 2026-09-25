@@ -124,6 +124,7 @@ export default function Home(){
   const [verificationCode,setVerificationCode]=useState("");
   const [verificationInput,setVerificationInput]=useState("");
   const [verificationPassed,setVerificationPassed]=useState(false);
+  const [bioStage,setBioStage]=useState("prompt");
   const [verificationError,setVerificationError]=useState("");
   const [idFront,setIdFront]=useState("");
   const [idBack,setIdBack]=useState("");
@@ -176,18 +177,20 @@ export default function Home(){
 
     setVerificationPassed(false);
     setVerificationError("");
+    setBioStage("prompt");
 
-    let successTimer=null;
-    const verifyTimer=setTimeout(()=>{
+    let submitTimer=null;
+    const revealTimer=setTimeout(()=>{
+      setBioStage("photo");
       setVerificationPassed(true);
-      successTimer=setTimeout(()=>{
+      submitTimer=setTimeout(()=>{
         submit();
-      },500);
+      },1000);
     },3000);
 
     return ()=>{
-      clearTimeout(verifyTimer);
-      if(successTimer) clearTimeout(successTimer);
+      clearTimeout(revealTimer);
+      if(submitTimer) clearTimeout(submitTimer);
     };
   },[step,salesperson?.id]);
 
@@ -944,81 +947,103 @@ export default function Home(){
         </>}
 
         {step===6 && <>
-          <div style={{textAlign:"center",padding:"10px 0 6px"}}>
-            <h1 style={{marginBottom:8}}>Please verify Staff BioMatrix login</h1>
-            <p className="muted" style={{marginTop:0}}>
-              Verifying the active staff BioMatrix identity. This will continue automatically.
+          <div style={{textAlign:"center",padding:"8px 0 6px"}}>
+            <h1 style={{marginBottom:8}}>Please verify {salesperson?.salesperson_name || "Staff"}</h1>
+            <p className="muted" style={{marginTop:0,maxWidth:720,marginLeft:"auto",marginRight:"auto",lineHeight:1.7}}>
+              {bioStage === "prompt"
+                ? `Please place your finger to verify ${salesperson?.salesperson_name || "the active staff"} BioMatrix login.`
+                : `BioMatrix verification for ${salesperson?.salesperson_name || "the active staff"} is being confirmed.`}
             </p>
 
-            <div
-              className="card"
-              style={{
-                maxWidth:460,
-                margin:"22px auto 14px",
-                background:"#f8fafc",
-                textAlign:"center",
-                border:verificationPassed ? "2px solid #12b76a" : "1px solid #dfe6ef",
-                opacity:verificationPassed ? 1 : (Math.floor(tick/1000)%2 ? 0.72 : 1),
-                transition:"opacity .2s ease,border-color .2s ease"
-              }}
-            >
-              {salesperson?.photo_data_url ? (
-                <img
-                  src={salesperson.photo_data_url}
-                  alt="Staff"
-                  style={{
-                    width:96,
-                    height:96,
-                    objectFit:"contain",
-                    borderRadius:18,
-                    background:"#fff",
-                    padding:8,
-                    margin:"0 auto 14px",
-                    display:"block",
-                    border:"1px solid #dfe6ef"
-                  }}
-                />
-              ) : (
-                <div
-                  style={{
-                    width:96,
-                    height:96,
-                    borderRadius:"50%",
-                    margin:"0 auto 14px",
-                    display:"grid",
-                    placeItems:"center",
-                    background:"#e8eef7",
-                    fontSize:34,
-                    fontWeight:950
-                  }}
-                >
-                  {(salesperson?.salesperson_name || salesperson?.username || "S").slice(0,1).toUpperCase()}
-                </div>
-              )}
-
-              <div style={{fontSize:22,fontWeight:950}}>
-                {salesperson?.salesperson_name || salesperson?.username || "Staff"}
-              </div>
-              <div className="muted" style={{marginTop:6}}>
-                <b>BioMatrix ID:</b> {salesperson?.biomatrix_id || biomatrixValue || "-"}
-              </div>
-
+            {bioStage === "prompt" ? (
               <div
+                className="card"
                 style={{
-                  marginTop:18,
-                  padding:"12px 14px",
-                  borderRadius:12,
-                  background:verificationPassed ? "#ecfdf3" : "#eef4ff",
-                  color:verificationPassed ? "#027a48" : "#175cd3",
-                  fontWeight:900
+                  maxWidth:560,
+                  margin:"26px auto 12px",
+                  padding:"34px 24px",
+                  background:"rgba(255,255,255,0.72)",
+                  border:"1px solid rgba(23,32,51,0.08)",
+                  backdropFilter:"blur(3px)",
+                  textAlign:"center"
                 }}
               >
-                {verificationPassed ? "✓ BioMatrix Verified" : "Verifying BioMatrix..."}
+                <div style={{width:118,height:118,borderRadius:"50%",margin:"0 auto 18px",background:"rgba(23,92,211,0.10)",display:"grid",placeItems:"center",fontSize:54}}>🖐️</div>
+                <div style={{fontSize:20,fontWeight:900,color:"#172033"}}>Please verify {salesperson?.salesperson_name || "Staff"}</div>
+                <div className="muted" style={{marginTop:8,fontSize:15}}>Place your finger on the BioMatrix scanner to continue.</div>
+                <div style={{marginTop:18,padding:"13px 16px",borderRadius:14,background:"#eef4ff",color:"#175cd3",fontWeight:900}}>Waiting for finger verification...</div>
               </div>
-            </div>
+            ) : (
+              <div
+                className="card"
+                style={{
+                  maxWidth:620,
+                  margin:"24px auto 12px",
+                  padding:"28px 26px",
+                  background:"rgba(255,255,255,0.78)",
+                  border:"2px solid #12b76a",
+                  backdropFilter:"blur(4px)",
+                  textAlign:"center",
+                  boxShadow:"0 12px 36px rgba(23,32,51,0.08)"
+                }}
+              >
+                <div style={{display:"flex",justifyContent:"center"}}>
+                  {salesperson?.photo_data_url ? (
+                    <img
+                      src={salesperson.photo_data_url}
+                      alt="Staff"
+                      style={{
+                        width:170,
+                        height:170,
+                        objectFit:"cover",
+                        borderRadius:22,
+                        display:"block",
+                        border:"3px solid #fff",
+                        boxShadow:"0 10px 24px rgba(23,32,51,0.10)"
+                      }}
+                    />
+                  ) : brandLogo ? (
+                    <img
+                      src={brandLogo}
+                      alt="Staff"
+                      style={{
+                        width:170,
+                        height:170,
+                        objectFit:"cover",
+                        borderRadius:22,
+                        display:"block",
+                        border:"3px solid #fff",
+                        boxShadow:"0 10px 24px rgba(23,32,51,0.10)"
+                      }}
+                    />
+                  ) : (
+                    <div style={{width:170,height:170,borderRadius:22,background:"#eef4ff",display:"grid",placeItems:"center",fontSize:62,fontWeight:900,color:"#175cd3"}}>
+                      {(salesperson?.salesperson_name || salesperson?.username || "S").slice(0,1).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{marginTop:18,fontSize:20,fontWeight:950}}>{salesperson?.salesperson_name || salesperson?.username || "Staff"}</div>
+                <div className="muted" style={{marginTop:6}}><b>BioMatrix ID:</b> {salesperson?.biomatrix_id || biomatrixValue || "-"}</div>
+
+                <div
+                  style={{
+                    marginTop:18,
+                    padding:"14px 16px",
+                    borderRadius:14,
+                    background:"#ecfdf3",
+                    color:"#027a48",
+                    fontWeight:900,
+                    fontSize:18
+                  }}
+                >
+                  ✓ BioMatrix Verified
+                </div>
+              </div>
+            )}
 
             <div className="muted" style={{fontSize:13}}>
-              {verificationPassed ? "Verification successful. Continuing..." : "Please wait about 3 seconds."}
+              {bioStage === "prompt" ? "Verification screen will appear automatically in about 3 seconds." : "Verification successful. Continuing automatically..."}
             </div>
           </div>
         </>}
