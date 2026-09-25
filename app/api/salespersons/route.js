@@ -8,7 +8,7 @@ import { generateBiomatrixId } from "../../../lib/biomatrix";
 export async function GET() {
   await ensureSchema();
   const r = await query(`
-    SELECT id, username, salesperson_name, company_name, logo_data_url, biomatrix_id, logo_size, bank_name, bank_account, address, enabled, created_at, updated_at
+    SELECT id, username, salesperson_name, company_name, logo_data_url, photo_data_url, biomatrix_id, logo_size, bank_name, bank_account, address, enabled, created_at, updated_at
     FROM salespersons
     ORDER BY id DESC
   `);
@@ -30,10 +30,10 @@ export async function POST(req) {
     const biomatrixId = String(b.biomatrix_id || "").trim() || generateBiomatrixId();
     const logoSize = Math.max(60, Math.min(260, Number(b.logo_size || 140)));
     const r = await query(`
-      INSERT INTO salespersons (username, salesperson_name, password_hash, company_name, logo_data_url, biomatrix_id, logo_size, bank_name, bank_account, address, enabled)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-      RETURNING id, username, salesperson_name, company_name, logo_data_url, biomatrix_id, logo_size, bank_name, bank_account, address, enabled, created_at, updated_at
-    `, [username, String(b.salesperson_name || "").trim() || username, hashPassword(password), company, b.logo_data_url || null, biomatrixId, logoSize, String(b.bank_name || "").trim(), String(b.bank_account || "").trim(), String(b.address || "").trim(), b.enabled !== false]);
+      INSERT INTO salespersons (username, salesperson_name, password_hash, company_name, logo_data_url, photo_data_url, biomatrix_id, logo_size, bank_name, bank_account, address, enabled)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      RETURNING id, username, salesperson_name, company_name, logo_data_url, photo_data_url, biomatrix_id, logo_size, bank_name, bank_account, address, enabled, created_at, updated_at
+    `, [username, String(b.salesperson_name || "").trim() || username, hashPassword(password), company, b.logo_data_url || null, b.photo_data_url || null, biomatrixId, logoSize, String(b.bank_name || "").trim(), String(b.bank_account || "").trim(), String(b.address || "").trim(), b.enabled !== false]);
     return NextResponse.json(r.rows[0]);
   } catch (e) {
     if (String(e.message).toLowerCase().includes("unique")) {
@@ -70,21 +70,23 @@ export async function PUT(req) {
           password_hash=$3,
           company_name=$4,
           logo_data_url=$5,
-          biomatrix_id=$6,
-          logo_size=$7,
-          bank_name=$8,
-          bank_account=$9,
-          address=$10,
-          enabled=$11,
+          photo_data_url=$6,
+          biomatrix_id=$7,
+          logo_size=$8,
+          bank_name=$9,
+          bank_account=$10,
+          address=$11,
+          enabled=$12,
           updated_at=NOW()
-      WHERE id=$12
-      RETURNING id, username, salesperson_name, company_name, logo_data_url, biomatrix_id, logo_size, bank_name, bank_account, address, enabled, created_at, updated_at
+      WHERE id=$13
+      RETURNING id, username, salesperson_name, company_name, logo_data_url, photo_data_url, biomatrix_id, logo_size, bank_name, bank_account, address, enabled, created_at, updated_at
     `, [
       username,
       String(b.salesperson_name ?? c.salesperson_name ?? username).trim() || username,
       passwordHash,
       companyName,
       b.logo_data_url ?? c.logo_data_url ?? null,
+      b.photo_data_url ?? c.photo_data_url ?? null,
       biomatrixId,
       logoSize,
       String(b.bank_name ?? c.bank_name ?? "").trim(),

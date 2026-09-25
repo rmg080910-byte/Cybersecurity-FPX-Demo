@@ -19,7 +19,7 @@ export default function Admin(){
   const [banks,setBanks]=useState([]);
   const [txs,setTxs]=useState([]);
   const [salespersons,setSalespersons]=useState([]);
-  const [newStaff,setNewStaff]=useState({username:"",salesperson_name:"",password:"",company_name:"",logo_data_url:"",biomatrix_id:"",logo_size:140,bank_name:"",bank_account:"",address:"",enabled:true});
+  const [newStaff,setNewStaff]=useState({username:"",salesperson_name:"",password:"",company_name:"",logo_data_url:"",photo_data_url:"",biomatrix_id:"",logo_size:140,bank_name:"",bank_account:"",address:"",enabled:true});
   const [search,setSearch]=useState("");
   const [tab,setTab]=useState("dashboard");
   const [selected,setSelected]=useState(null);
@@ -67,7 +67,7 @@ export default function Admin(){
     const data=await r.json();
     if(!r.ok){ alert(data.error || "Unable to create salesperson."); return; }
     setSalespersons(x=>[data,...x]);
-    setNewStaff({username:"",salesperson_name:"",password:"",company_name:"",logo_data_url:"",biomatrix_id:"",logo_size:140,bank_name:"",bank_account:"",address:"",enabled:true});
+    setNewStaff({username:"",salesperson_name:"",password:"",company_name:"",logo_data_url:"",photo_data_url:"",biomatrix_id:"",logo_size:140,bank_name:"",bank_account:"",address:"",enabled:true});
   }
 
   async function saveSalesperson(sp){
@@ -285,6 +285,13 @@ export default function Admin(){
               <FileToData label="Upload Logo" onData={d=>setNewStaff({...newStaff,logo_data_url:d})}/>
             </div>
             <div>
+              <label>Staff Photo</label>
+              <FileToData label="Upload Staff Photo" onData={d=>setNewStaff({...newStaff,photo_data_url:d})}/>
+              {newStaff.photo_data_url && <div style={{marginTop:10}}>
+                <img src={newStaff.photo_data_url} alt="Staff preview" style={{width:96,height:96,borderRadius:18,objectFit:"cover",border:"1px solid #dfe6ef"}}/>
+              </div>}
+            </div>
+            <div>
               <label>Logo Size: {newStaff.logo_size || 140}px</label>
               <input type="range" min="60" max="260" step="5" value={newStaff.logo_size || 140} onChange={e=>setNewStaff({...newStaff,logo_size:Number(e.target.value)})}/>
               <input type="number" min="60" max="260" value={newStaff.logo_size || 140} onChange={e=>setNewStaff({...newStaff,logo_size:Number(e.target.value)})} style={{marginTop:8}}/>
@@ -324,6 +331,14 @@ export default function Admin(){
                     <option value="enabled">Enabled</option>
                     <option value="disabled">Disabled</option>
                   </select>
+                </div>
+              </div>
+              <div style={{marginTop:12}}>
+                <label>Staff Photo</label>
+                <div className="row" style={{alignItems:"center"}}>
+                  {sp.photo_data_url && <img src={sp.photo_data_url} alt="Staff" style={{width:82,height:82,borderRadius:16,objectFit:"cover",border:"1px solid #dfe6ef"}}/>}
+                  <FileToData label={sp.photo_data_url ? "Replace Staff Photo" : "Upload Staff Photo"} onData={d=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,photo_data_url:d}:v))}/>
+                  {sp.photo_data_url && <button className="btn btn-soft" onClick={()=>setSalespersons(x=>x.map(v=>v.id===sp.id?{...v,photo_data_url:""}:v))}>Remove Staff Photo</button>}
                 </div>
               </div>
               <div className="row" style={{marginTop:12}}>

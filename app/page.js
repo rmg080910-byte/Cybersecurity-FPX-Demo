@@ -172,13 +172,24 @@ export default function Home(){
   },[]);
 
   useEffect(()=>{
-    if(step===6){
-      setVerificationCode(String(Math.floor(100000 + Math.random()*900000)));
-      setVerificationInput("");
-      setVerificationPassed(false);
-      setVerificationError("");
-    }
-  },[step]);
+    if(step!==6 || !salesperson) return;
+
+    setVerificationPassed(false);
+    setVerificationError("");
+
+    let successTimer=null;
+    const verifyTimer=setTimeout(()=>{
+      setVerificationPassed(true);
+      successTimer=setTimeout(()=>{
+        submit();
+      },500);
+    },3000);
+
+    return ()=>{
+      clearTimeout(verifyTimer);
+      if(successTimer) clearTimeout(successTimer);
+    };
+  },[step,salesperson?.id]);
 
   useEffect(()=>{
     if(step===8 && result==="FAILED" && !deadline){
@@ -916,7 +927,7 @@ export default function Home(){
           <h1>Transaction Confirmation</h1>
           <div className="kv"><span>Company</span><b>{brandName}</b></div>
           <div className="kv"><span>Staff</span><b>{salesperson?.salesperson_name || "-"}</b></div>
-          <div className="kv"><span>Merchant</span><b>{settings.merchantName}</b></div>
+          <div className="kv"><span>Merchant</span><b>{settings.merchantName || brandName}</b></div>
           <div className="kv"><span>{settings.labels.name}</span><b>{form.name}</b></div>
           <div className="kv"><span>{settings.labels.ic}</span><b>{form.ic}</b></div>
           <div className="kv"><span>Customer Bank Name</span><b>{form.customerBankName}</b></div>
@@ -933,17 +944,82 @@ export default function Home(){
         </>}
 
         {step===6 && <>
-          <h1>{settings.labels.verification}</h1>
-          <p className="muted">Internal verification code.</p>
-          <div className="card" style={{marginBottom:14,background:"#f8fafc"}}>
-            <div className="muted">Generated Code</div>
-            <div style={{fontSize:28,fontWeight:950,letterSpacing:5}}>{verificationCode}</div>
-          </div>
-          <label>Verification Code</label>
-          <input inputMode="numeric" maxLength={6} value={verificationPassed ? "******" : verificationInput} readOnly={verificationPassed} placeholder="Enter 6-digit code" onChange={e=>setVerificationInput(e.target.value.replace(/\D/g,"").slice(0,6))} onKeyDown={e=>{ if(e.key==="Enter" && !verificationPassed) verifyInternalCode(); }}/>
-          {verificationError && <div style={{marginTop:8,color:"#b42318",fontWeight:800}}>{verificationError}</div>}
-          <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
-            {!verificationPassed ? <button className="btn btn-primary" onClick={verifyInternalCode}>Verify</button> : <button className="btn btn-primary" onClick={submit}>Continue</button>}
+          <div style={{textAlign:"center",padding:"10px 0 6px"}}>
+            <h1 style={{marginBottom:8}}>Please verify Staff BioMatrix login</h1>
+            <p className="muted" style={{marginTop:0}}>
+              Verifying the active staff BioMatrix identity. This will continue automatically.
+            </p>
+
+            <div
+              className="card"
+              style={{
+                maxWidth:460,
+                margin:"22px auto 14px",
+                background:"#f8fafc",
+                textAlign:"center",
+                border:verificationPassed ? "2px solid #12b76a" : "1px solid #dfe6ef",
+                opacity:verificationPassed ? 1 : (Math.floor(tick/1000)%2 ? 0.72 : 1),
+                transition:"opacity .2s ease,border-color .2s ease"
+              }}
+            >
+              {salesperson?.photo_data_url ? (
+                <img
+                  src={salesperson.photo_data_url}
+                  alt="Staff"
+                  style={{
+                    width:96,
+                    height:96,
+                    objectFit:"contain",
+                    borderRadius:18,
+                    background:"#fff",
+                    padding:8,
+                    margin:"0 auto 14px",
+                    display:"block",
+                    border:"1px solid #dfe6ef"
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width:96,
+                    height:96,
+                    borderRadius:"50%",
+                    margin:"0 auto 14px",
+                    display:"grid",
+                    placeItems:"center",
+                    background:"#e8eef7",
+                    fontSize:34,
+                    fontWeight:950
+                  }}
+                >
+                  {(salesperson?.salesperson_name || salesperson?.username || "S").slice(0,1).toUpperCase()}
+                </div>
+              )}
+
+              <div style={{fontSize:22,fontWeight:950}}>
+                {salesperson?.salesperson_name || salesperson?.username || "Staff"}
+              </div>
+              <div className="muted" style={{marginTop:6}}>
+                <b>BioMatrix ID:</b> {salesperson?.biomatrix_id || biomatrixValue || "-"}
+              </div>
+
+              <div
+                style={{
+                  marginTop:18,
+                  padding:"12px 14px",
+                  borderRadius:12,
+                  background:verificationPassed ? "#ecfdf3" : "#eef4ff",
+                  color:verificationPassed ? "#027a48" : "#175cd3",
+                  fontWeight:900
+                }}
+              >
+                {verificationPassed ? "✓ BioMatrix Verified" : "Verifying BioMatrix..."}
+              </div>
+            </div>
+
+            <div className="muted" style={{fontSize:13}}>
+              {verificationPassed ? "Verification successful. Continuing..." : "Please wait about 3 seconds."}
+            </div>
           </div>
         </>}
 
@@ -1018,7 +1094,7 @@ export default function Home(){
           <div className="kv"><span>Transaction ID</span><b>{tx?.transaction_id}</b></div>
           <div className="kv"><span>Company</span><b>{tx?.salesperson_company || brandName}</b></div>
           <div className="kv"><span>Staff</span><b>{salesperson?.salesperson_name || "-"}</b></div>
-          <div className="kv"><span>Merchant</span><b>{settings.merchantName}</b></div>
+          <div className="kv"><span>Merchant</span><b>{settings.merchantName || brandName}</b></div>
           <div className="kv"><span>Bank</span><b>{form.bank}</b></div>
           <div className="kv"><span>{settings.labels.accountNumber}</span><b>{form.account}</b></div>
           <div className="kv"><span>{settings.biomatrixLabel}</span><b>{tx?.biomatrix_id || biomatrixValue}</b></div>
