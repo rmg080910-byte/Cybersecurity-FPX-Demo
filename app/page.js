@@ -972,10 +972,12 @@ export default function Home(){
                 <div style={{padding:"14px 18px",borderRadius:16,background:"#eef4ff",color:"#175cd3",fontWeight:900,fontSize:16}}>Waiting for biometric verification...</div>
               </> : <>
                 <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
-                  {salesperson?.staff_photo_data_url ? (
-                    <img src={salesperson.staff_photo_data_url} alt="Staff" style={{width:160,height:160,borderRadius:24,objectFit:"cover",border:"1px solid #dfe6ef",boxShadow:"0 12px 28px rgba(17,24,39,.12)"}}/>
+                  {(salesperson?.staff_photo_data_url || salesperson?.photo_data_url) ? (
+                    <img src={salesperson.staff_photo_data_url || salesperson.photo_data_url} alt="Staff" style={{width:180,height:180,borderRadius:24,objectFit:"cover",border:"1px solid #dfe6ef",boxShadow:"0 12px 28px rgba(17,24,39,.12)"}}/>
+                  ) : salesperson?.logo_data_url ? (
+                    <img src={salesperson.logo_data_url} alt="Staff" style={{width:180,height:180,borderRadius:24,objectFit:"contain",background:"#fff",padding:10,border:"1px solid #dfe6ef",boxShadow:"0 12px 28px rgba(17,24,39,.12)"}}/>
                   ) : (
-                    <div style={{width:160,height:160,borderRadius:24,display:"grid",placeItems:"center",background:"#eef4ff",border:"1px solid #dfe6ef"}}><BioScanIcon /></div>
+                    <div style={{width:180,height:180,borderRadius:24,display:"grid",placeItems:"center",background:"#eef4ff",border:"1px solid #dfe6ef"}}><BioScanIcon /></div>
                   )}
                 </div>
                 <div style={{fontSize:30,fontWeight:950,marginBottom:6}}>{salesperson?.salesperson_name || "Staff"}</div>
