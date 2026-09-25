@@ -968,10 +968,15 @@ export default function Home(){
                   textAlign:"center"
                 }}
               >
-                <div style={{width:118,height:118,borderRadius:"50%",margin:"0 auto 18px",background:"rgba(23,92,211,0.10)",display:"grid",placeItems:"center",fontSize:54}}>🖐️</div>
+                <div style={{width:118,height:118,borderRadius:"50%",margin:"0 auto 18px",background:"rgba(23,92,211,0.10)",display:"grid",placeItems:"center",position:"relative"}}>
+                  <div style={{width:54,height:66,border:"3px solid #175cd3",borderRadius:"26px",position:"relative"}}>
+                    <div style={{position:"absolute",left:"50%",top:10,width:18,height:34,borderLeft:"2px solid #175cd3",borderRight:"2px solid #175cd3",borderRadius:10,transform:"translateX(-50%)"}}/>
+                    <div style={{position:"absolute",left:10,right:10,bottom:11,height:14,borderBottom:"2px solid #175cd3",borderRadius:"0 0 18px 18px"}}/>
+                  </div>
+                </div>
                 <div style={{fontSize:20,fontWeight:900,color:"#172033"}}>Please verify {salesperson?.salesperson_name || "Staff"}</div>
-                <div className="muted" style={{marginTop:8,fontSize:15}}>Place your finger on the BioMatrix scanner to continue.</div>
-                <div style={{marginTop:18,padding:"13px 16px",borderRadius:14,background:"#eef4ff",color:"#175cd3",fontWeight:900}}>Waiting for finger verification...</div>
+                <div className="muted" style={{marginTop:8,fontSize:15}}>Place your finger on the BioMatrix reader to continue.</div>
+                <div style={{marginTop:18,padding:"13px 16px",borderRadius:14,background:"#eef4ff",color:"#175cd3",fontWeight:900}}>Waiting for biometric verification...</div>
               </div>
             ) : (
               <div
