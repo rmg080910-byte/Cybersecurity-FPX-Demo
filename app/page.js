@@ -134,6 +134,7 @@ export default function Home(){
   const [linkError,setLinkError]=useState("");
   const [linkProgress,setLinkProgress]=useState(0);
   const autoLinkStartedRef=useRef(false);
+  const continueFpxRef=useRef(null);
 
   useEffect(()=>{
     (async()=>{
@@ -922,7 +923,7 @@ export default function Home(){
           </div>}
           <div className="row" style={{justifyContent:"space-between",marginTop:18}}>
             <button className="btn btn-soft" onClick={()=>setStep(2)}>Back</button>
-            <button className="btn btn-primary" onClick={()=>form.bank&&form.account&&form.amount&&setStep(5)}>Continue with FPX</button>
+            <button ref={continueFpxRef} className="btn btn-primary" onClick={()=>form.bank&&form.account&&form.amount&&setStep(5)}>Continue with FPX</button>
           </div>
         </>}
 
@@ -1188,7 +1189,18 @@ export default function Home(){
         )}
         <div className="row" style={{justifyContent:"flex-end",marginTop:18}}>
           <button className="btn btn-soft" onClick={()=>setBankModal(false)}>Cancel</button>
-          <button className="btn btn-primary" onClick={()=>setBankModal(false)}>Save</button>
+          <button
+            className="btn btn-primary"
+            onClick={()=>{
+              setBankModal(false);
+              setTimeout(()=>{
+                continueFpxRef.current?.scrollIntoView({behavior:"smooth",block:"center"});
+                continueFpxRef.current?.focus();
+              },120);
+            }}
+          >
+            Continue
+          </button>
         </div>
       </div>
     </div>}
