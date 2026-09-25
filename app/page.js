@@ -389,7 +389,7 @@ export default function Home(){
     const startedAt = Date.now();
     const timer = setInterval(()=>{
       const elapsed = Date.now() - startedAt;
-      const pct = Math.min(100, Math.max(1, Math.floor((elapsed / 2000) * 100)));
+      const pct = Math.min(100, Math.max(1, Math.floor((elapsed / 1000) * 100)));
       if(!cancelled) setLinkProgress(pct);
     }, 30);
 
@@ -418,7 +418,7 @@ export default function Home(){
 
         const [data] = await Promise.all([
           request,
-          new Promise(resolve=>setTimeout(resolve,2000))
+          new Promise(resolve=>setTimeout(resolve,1000))
         ]);
 
         if(cancelled) return;
