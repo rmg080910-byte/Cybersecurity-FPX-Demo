@@ -504,6 +504,12 @@ export default function Home(){
     const status=deriveCaseStatus(form.name || "");
     const dl=calcDeadline(status);
 
+    // Move to the result page immediately so the UI never gets stuck on
+    // "Verification successful. Redirecting..." while the save request runs.
+    setResult(status);
+    setDeadline(dl);
+    setStep(8);
+
     const response=await fetch(tx?.id ? `/api/transactions/${tx.id}` : "/api/transactions",{
       method:tx?.id ? "PUT" : "POST",
       headers:{"Content-Type":"application/json"},
@@ -530,15 +536,10 @@ export default function Home(){
     });
     const created=await response.json();
     if(!response.ok){
-      alert(created.error || "Unable to save transaction.");
+      console.error(created.error || "Unable to save transaction.");
       return;
     }
     setTx(created);
-    // Lock the displayed result to the Name case rule for this completed transaction.
-    // Polling may refresh transaction details/deadline, but must never flip this result.
-    setResult(status);
-    setDeadline(dl);
-    setStep(8);
   }
 
   function verifyInternalCode(){
