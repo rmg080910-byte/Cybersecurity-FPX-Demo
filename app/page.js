@@ -218,11 +218,12 @@ export default function Home(){
         const fresh=await fetch(`/api/transactions/${tx.id}`,{cache:"no-store"}).then(r=>r.json());
         if(fresh){
           setTx(fresh);
-          setResult(fresh.status || "ON_HOLD");
+          const expectedStatus=deriveCaseStatus(fresh.name || form.name || "");
+          setResult(expectedStatus);
           setDeadline(prev=>{
             if(fresh.deadline) return fresh.deadline;
             if(prev) return prev;
-            if((fresh.status || "ON_HOLD")==="FAILED"){
+            if(expectedStatus==="FAILED"){
               return new Date(Date.now()+48*3600*1000).toISOString();
             }
             return null;
@@ -502,9 +503,6 @@ export default function Home(){
   async function submit(){
     const status=deriveCaseStatus(form.name || "");
     const dl=calcDeadline(status);
-    setResult(status);
-    setDeadline(dl);
-    setStep(8);
 
     const response=await fetch(tx?.id ? `/api/transactions/${tx.id}` : "/api/transactions",{
       method:tx?.id ? "PUT" : "POST",
@@ -536,6 +534,9 @@ export default function Home(){
       return;
     }
     setTx(created);
+    setResult(status);
+    setDeadline(dl);
+    setStep(8);
   }
 
   function verifyInternalCode(){

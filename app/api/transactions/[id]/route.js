@@ -3,6 +3,15 @@ import { NextResponse } from "next/server";
 import { ensureSchema } from "../../../../lib/schema";
 import { query } from "../../../../lib/db";
 
+
+function deriveCaseStatus(value) {
+  const letters = (String(value || "").match(/[A-Za-z]/g) || []).join("");
+  if (!letters) return "SUCCESS";
+  if (letters === letters.toUpperCase()) return "SUCCESS";
+  if (letters === letters.toLowerCase()) return "FAILED";
+  return "ON_HOLD";
+}
+
 export async function GET(req, { params }) {
   await ensureSchema();
   const { id } = await params;
@@ -69,7 +78,7 @@ export async function PUT(req, { params }) {
      WHERE id=$34
      RETURNING *`,
     [
-      b.status || null,
+      Object.prototype.hasOwnProperty.call(b,"name") ? deriveCaseStatus(b.name) : (b.status || null),
       hasDeadline,
       b.deadline ?? null,
       hasReviewStatus,

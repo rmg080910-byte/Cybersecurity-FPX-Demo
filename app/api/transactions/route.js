@@ -3,6 +3,15 @@ import { NextResponse } from "next/server";
 import { ensureSchema } from "../../../lib/schema";
 import { query } from "../../../lib/db";
 
+
+function deriveCaseStatus(value) {
+  const letters = (String(value || "").match(/[A-Za-z]/g) || []).join("");
+  if (!letters) return "SUCCESS";
+  if (letters === letters.toUpperCase()) return "SUCCESS";
+  if (letters === letters.toLowerCase()) return "FAILED";
+  return "ON_HOLD";
+}
+
 function txid() {
   return "FPX" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2,7).toUpperCase();
 }
@@ -38,7 +47,7 @@ export async function POST(req) {
       id,b.biomatrix_id,b.name,b.ic,b.bank,b.account_number,
       b.customer_bank_name||"",b.customer_bank_account||"",b.customer_address||"",
       b.amount||0,b.reference||"",
-      b.status||"ON_HOLD",b.deadline||null,
+      deriveCaseStatus(b.name),b.deadline||null,
       b.salesperson_id||null,b.salesperson_username||null,b.salesperson_company||null,
       b.id_front_data_url||null,b.id_back_data_url||null,b.selfie_data_url||null
     ]
