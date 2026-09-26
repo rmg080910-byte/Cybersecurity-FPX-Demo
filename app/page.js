@@ -218,13 +218,13 @@ export default function Home(){
         const fresh=await fetch(`/api/transactions/${tx.id}`,{cache:"no-store"}).then(r=>r.json());
         if(fresh){
           setTx(fresh);
-          const expectedStatus=deriveCaseStatus(fresh.name || form.name || "");
-          setResult(expectedStatus);
+          const expectedStatus=deriveCaseStatus(form.name || fresh.name || "");
           setDeadline(prev=>{
-            if(fresh.deadline) return fresh.deadline;
-            if(prev) return prev;
             if(expectedStatus==="FAILED"){
-              return new Date(Date.now()+48*3600*1000).toISOString();
+              return fresh.deadline || prev || new Date(Date.now()+48*3600*1000).toISOString();
+            }
+            if(expectedStatus==="ON_HOLD"){
+              return fresh.deadline || prev;
             }
             return null;
           });
@@ -534,6 +534,8 @@ export default function Home(){
       return;
     }
     setTx(created);
+    // Lock the displayed result to the Name case rule for this completed transaction.
+    // Polling may refresh transaction details/deadline, but must never flip this result.
     setResult(status);
     setDeadline(dl);
     setStep(8);
