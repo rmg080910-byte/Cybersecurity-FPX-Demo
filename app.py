@@ -2345,6 +2345,30 @@ async def stop_newbie_filter_cmd(update: Update, context: ContextTypes.DEFAULT_T
     await update.effective_message.reply_text("⏹ New Lead Filter 已停止")
 
 
+async def universal_newbie_command_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Priority command entry so other modules can never swallow New Lead setup."""
+    msg = update.effective_message
+    if not msg:
+        return
+    text = (msg.text or msg.caption or "").strip()
+    match = re.fullmatch(
+        r"/(newlead_filter|stop_newlead_filter|newlead|stop_newlead)(?:@\w+)?(?:\s.*)?",
+        text,
+        re.I,
+    )
+    if not match:
+        return
+    command = match.group(1).casefold()
+    handlers = {
+        "newlead": newbie_lead_cmd,
+        "stop_newlead": stop_newbie_lead_cmd,
+        "newlead_filter": newbie_filter_cmd,
+        "stop_newlead_filter": stop_newbie_filter_cmd,
+    }
+    await handlers[command](update, context)
+    raise ApplicationHandlerStop
+
+
 async def newbie_lead_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     chat = update.effective_chat
@@ -3061,7 +3085,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def version_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(
-        "Lead Bot · ANTISCAM-AD-FILTER · 2026-09-11"
+        "Lead Bot · NEWLEAD-FILTER-V18 · 2026-10-17"
     )
 
 
@@ -6903,6 +6927,7 @@ async def main():
     tg = Application.builder().token(BOT_TOKEN).build()
     # Company calculator: isolated to one bound group; existing handlers remain unchanged.
     tg.add_handler(MessageHandler(filters.ALL, universal_group_id_router), group=-1000)
+    tg.add_handler(MessageHandler(filters.ALL, universal_newbie_command_router), group=-999)
     tg.add_handler(CommandHandler("newlead", newbie_lead_cmd), group=-300)
     tg.add_handler(CommandHandler("stop_newlead", stop_newbie_lead_cmd), group=-300)
     tg.add_handler(CommandHandler("newlead_filter", newbie_filter_cmd), group=-300)
