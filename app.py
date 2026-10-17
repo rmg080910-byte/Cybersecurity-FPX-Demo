@@ -14,7 +14,7 @@ from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from aiohttp import ClientSession, web
-from telegram import Update, InputMediaPhoto, InputMediaVideo, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InputMediaPhoto, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, ApplicationHandlerStop, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.error import RetryAfter, TimedOut, NetworkError
 from openpyxl import load_workbook
@@ -171,6 +171,24 @@ def init_db():
           updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS newbie_lead_groups(
+          chat_id INTEGER PRIMARY KEY,
+          title TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        INSERT OR IGNORE INTO newbie_lead_groups(
+          chat_id,title,enabled,created_at,updated_at
+        ) VALUES(-5169394920,'1',1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS newbie_lead_filter_groups(
+          chat_id INTEGER PRIMARY KEY,
+          title TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS persistent_settings(
           key TEXT PRIMARY KEY,
           value TEXT,
@@ -266,15 +284,6 @@ def init_db():
           name TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS lead_resend_pending(
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          chat_id INTEGER NOT NULL,
-          requested_by INTEGER NOT NULL,
-          kind TEXT NOT NULL,
-          old_lead_id INTEGER,
-          data_json TEXT NOT NULL,
-          created_at TEXT NOT NULL
-        );
         INSERT OR IGNORE INTO settings(key,value) VALUES('rr_index','0');
         """)
         # Permanent report/audit fields. Safe migration for existing Railway DBs.
@@ -291,41 +300,15 @@ def now_iso():
     return datetime.now(TZ).isoformat(timespec="seconds")
 
 
-def _clean_phone_digits(value) -> str:
-    """Return only phone digits while tolerating common Excel/Telegram formatting.
-
-    Examples handled here: +60..., 0060..., spaces, dashes, brackets and an
-    Excel-looking integer rendered as ``60123456789.0``.  This helper does not
-    decide whether the number is Malaysian; validation stays in the normalizers.
-    """
-    raw = str(value or "").strip()
-    if re.fullmatch(r"\d+\.0+", raw):
-        raw = raw.split(".", 1)[0]
-    digits = re.sub(r"\D", "", raw)
+def normalize_phone(value: str) -> str:
+    digits = re.sub(r"\D", "", value or "")
     if digits.startswith("0060"):
         digits = digits[2:]
-    # Tolerate the occasional international + trunk form 6001... -> 601...
-    if digits.startswith("6001") and len(digits) in (12, 13):
-        digits = "60" + digits[3:]
-    return digits
-
-
-def normalize_phone(value: str) -> str:
-    """Normalize an explicit Malaysian mobile phone field to +60 format.
-
-    Because ``value`` is already a phone field, a missing Malaysian trunk zero is
-    safe to restore: 196025824 -> 0196025824 -> +60196025824.
-    """
-    digits = _clean_phone_digits(value)
-    if digits.startswith("01") and len(digits) in (10, 11):
+    elif digits.startswith("0"):
         digits = "60" + digits[1:]
-    elif digits.startswith("1") and len(digits) in (9, 10):
-        # Excel frequently strips the leading 0 from a local Malaysian mobile.
+    elif not digits.startswith("60") and 8 <= len(digits) <= 11:
         digits = "60" + digits
-    if not (digits.startswith("601") and len(digits) in (11, 12)):
-        raise ValueError("电话号码格式不正确")
-    local = digits[2:]
-    if len(set(local)) <= 2 or re.fullmatch(r"(123)+", local):
+    if not re.fullmatch(r"60\d{8,10}", digits):
         raise ValueError("电话号码格式不正确")
     return "+" + digits
 
@@ -593,24 +576,14 @@ def backup_route_matches_source(chat_id):
     )
 
 async def backup_copy_single_message(app, route, msg, safe_text):
-    """Copy one 888 source message to permanent Backup, preserving media when present."""
-    has_media = bool(
-        getattr(msg, "photo", None) or getattr(msg, "video", None) or
-        getattr(msg, "animation", None) or getattr(msg, "document", None) or
-        getattr(msg, "audio", None) or getattr(msg, "voice", None) or
-        getattr(msg, "video_note", None) or getattr(msg, "sticker", None)
-    )
-    if has_media:
-        kwargs = dict(
+    """Copy one text/photo source message to the permanent Backup group."""
+    if msg.photo:
+        copied = await app.bot.copy_message(
             chat_id=route["backup_chat_id"],
             from_chat_id=msg.chat_id,
             message_id=msg.message_id,
+            caption=safe_text[:1024] if safe_text else None,
         )
-        # Telegram captions are limited to 1024 chars.  Do not force an empty
-        # caption because that can strip the original caption on copy.
-        if safe_text:
-            kwargs["caption"] = safe_text[:1024]
-        copied = await app.bot.copy_message(**kwargs)
         return copied.message_id
 
     sent = await app.bot.send_message(
@@ -896,28 +869,15 @@ async def backup_flush_album(app, key):
     safe_text = backup_redact_full_text(text)
 
     media = []
-    media_sources = []
+    photo_sources = []
     for m in messages:
+        if not m.photo:
+            continue
+        photo_sources.append(m)
         cap = safe_text[:1024] if caption_msg and m.message_id == caption_msg.message_id else None
-        if m.photo:
-            media_sources.append(m)
-            media.append(InputMediaPhoto(media=m.photo[-1].file_id, caption=cap))
-        elif getattr(m, "video", None):
-            media_sources.append(m)
-            media.append(InputMediaVideo(media=m.video.file_id, caption=cap))
+        media.append(InputMediaPhoto(media=m.photo[-1].file_id, caption=cap))
 
     if not media:
-        # Unsupported media-group type: copy every item individually rather
-        # than silently dropping it from the 888 -> backup route.
-        for m in messages:
-            try:
-                await app.bot.copy_message(
-                    chat_id=route["backup_chat_id"],
-                    from_chat_id=chat_id,
-                    message_id=m.message_id,
-                )
-            except Exception:
-                LOG.exception("media-group item copy to backup failed")
         return
 
     # Capture previous canonical Backup album BEFORE replacing the record.
@@ -957,7 +917,7 @@ async def backup_flush_album(app, key):
         LOG.exception("grouped album send to backup failed")
         return
 
-    source_id = caption_msg.message_id if caption_msg else media_sources[0].message_id
+    source_id = caption_msg.message_id if caption_msg else photo_sources[0].message_id
     user = item["user"]
 
     action, row = backup_save_5_index(
@@ -1348,8 +1308,8 @@ async def backup_confirm_callback(update: Update, context: ContextTypes.DEFAULT_
 
 # ===== 888 FOLLOW-UP (locked to the 888 source group only) =====
 FOLLOWUP_SOURCE_CHAT_ID = -1003941232666
-FOLLOWUP_INTERVAL_HOURS = 1
-FOLLOWUP_DONE_WORDS = {"done", "可以", "可以了", "完成", "完成了", "已完成"}
+FOLLOWUP_INTERVAL_HOURS = 2
+FOLLOWUP_DONE_WORDS = {"done", "可以", "可以了", "完成", "完成了", "已完成", "go"}
 FOLLOWUP_FLY_WORDS = {"飞", "飛", "飞了", "飛了", "fly", "bye", "byebye", "gg"}
 FOLLOWUP_WAIT_WORDS = {"等待中", "等待", "等候中", "waiting", "wait"}
 
@@ -1574,7 +1534,7 @@ async def followup_send(bot, row, immediate=False):
         "2. 资料确认完了吗？\n"
         "3. 现在处理到哪里了？\n\n"
         "请 Reply 原资料或这条提醒：\n"
-        "• done / 可以 / 完成（不用追问）\n"
+        "• done / 可以 / go（不用追问）\n"
         "• 等待中 / wait / waiting + 备注（继续追问）\n"
         "• 也可以直接写问题 / 备注 / 处理进度（继续追问）\n"
         "• 飞了 / fly / bye / byebye / gg（不用追问；也支持 飞 / 飛 / 飛了）"
@@ -1607,6 +1567,13 @@ async def followup_start(bot, row, source_user):
     code=(row["code"] or "").strip()
     if not code:
         return
+    try:
+        if int(source_user.id) == int(OWNER_ID) or bot_admin_has(int(source_user.id)):
+            return
+    except Exception:
+        if int(source_user.id) == int(OWNER_ID):
+            return
+
     with db() as c:
         existing=c.execute(
             "SELECT id FROM backup_followups WHERE source_chat_id=? AND UPPER(TRIM(code))=UPPER(?) ORDER BY id LIMIT 1",
@@ -1629,7 +1596,7 @@ async def followup_start(bot, row, source_user):
         )
         fu = c.execute("SELECT * FROM backup_followups WHERE source_chat_id=? AND source_message_id=?",
                        (FOLLOWUP_SOURCE_CHAT_ID, int(row["source_message_id"]))).fetchone()
-    # Starts immediately during working hours; then every 1 hour.
+    # Starts immediately during working hours; then every 2 hours.
     if fu and fu["status"] not in ("done", "fly") and _fu_is_work_time(now):
         await followup_send(bot, fu, immediate=True)
 
@@ -1682,13 +1649,13 @@ async def followup_reply_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif is_wait:
         status="waiting"
         note=wait_note
-        label="🕐 已读 · 等待中，1小时后继续提醒"
+        label="🕐 已读 · 等待中，2小时后继续提醒"
     else:
         # Any member can record a question/note/progress by replying to this
         # follow-up. It becomes the next reminder context and keeps the flow active.
         status="waiting"
         note=raw
-        label="📝 已记录跟进，1小时后继续提醒"
+        label="📝 已记录跟进，2小时后继续提醒"
 
     if note:
         followup_note_add(fu["id"], note, user)
@@ -2204,6 +2171,196 @@ async def backup_cleanup_worker(app):
         await asyncio.sleep(5)
 
 
+def newbie_lead_is_active(chat_id):
+    with db() as c:
+        row = c.execute(
+            "SELECT enabled FROM newbie_lead_groups WHERE chat_id=?",
+            (int(chat_id),),
+        ).fetchone()
+    return bool(row and int(row["enabled"]) == 1)
+
+
+def newbie_lead_set(chat_id, title, enabled=True):
+    stamp = now_iso()
+    with db() as c:
+        if enabled:
+            # One current receiving group. Binding a new group switches the
+            # destination without requiring another ZIP deployment.
+            c.execute("UPDATE newbie_lead_groups SET enabled=0,updated_at=?", (stamp,))
+        c.execute(
+            """INSERT INTO newbie_lead_groups(chat_id,title,enabled,created_at,updated_at)
+               VALUES(?,?,?,?,?)
+               ON CONFLICT(chat_id) DO UPDATE SET
+                 title=excluded.title,
+                 enabled=excluded.enabled,
+                 updated_at=excluded.updated_at""",
+            (int(chat_id), title or str(chat_id), 1 if enabled else 0, stamp, stamp),
+        )
+
+
+def newbie_lead_target():
+    with db() as c:
+        return c.execute(
+            "SELECT chat_id,title FROM newbie_lead_groups WHERE enabled=1 LIMIT 1"
+        ).fetchone()
+
+
+def newbie_filter_is_active(chat_id):
+    with db() as c:
+        row = c.execute(
+            "SELECT enabled FROM newbie_lead_filter_groups WHERE chat_id=?",
+            (int(chat_id),),
+        ).fetchone()
+    return bool(row and int(row["enabled"]) == 1)
+
+
+def newbie_filter_set(chat_id, title, enabled=True):
+    stamp = now_iso()
+    with db() as c:
+        c.execute(
+            """INSERT INTO newbie_lead_filter_groups(chat_id,title,enabled,created_at,updated_at)
+               VALUES(?,?,?,?,?)
+               ON CONFLICT(chat_id) DO UPDATE SET
+                 title=excluded.title,
+                 enabled=excluded.enabled,
+                 updated_at=excluded.updated_at""",
+            (int(chat_id), title or str(chat_id), 1 if enabled else 0, stamp, stamp),
+        )
+
+
+def _newbie_clean_line(value):
+    value = str(value or "").strip()
+    while len(value) >= 4 and value[:2] == "**" and value[-2:] == "**":
+        value = value[2:-2].strip()
+    return value.strip("`_")
+
+
+def _newbie_phone_display(raw):
+    digits = re.sub(r"\D", "", str(raw or ""))
+    if digits.startswith("0060"):
+        digits = digits[2:]
+    if digits.startswith("60"):
+        digits = "0" + digits[2:]
+    return digits
+
+
+def parse_newbie_lead(text):
+    """Return the newcomer card as Name / Amount / Phone, or None."""
+    lines = [_newbie_clean_line(line) for line in str(text or "").replace("\r", "").splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return None
+
+    name = ""
+    name_index = -1
+    phone_label_index = -1
+    labelled_amount = ""
+    for index, line in enumerate(lines):
+        match = re.match(r"(?i)^name\s*[:：=-]\s*(.+?)\s*$", line)
+        if match and match.group(1).strip():
+            name = match.group(1).strip()
+            name_index = index
+        if re.match(r"(?i)^phone\s*[:：=-]?", line):
+            phone_label_index = index
+        match = re.match(
+            r"(?i)^(?:amount(?:\s+lost)?|jumlah(?:\s+wang\s+yang\s+ditipu)?)\s*[:：=-]\s*(.+?)\s*$",
+            line,
+        )
+        if match and match.group(1).strip():
+            labelled_amount = match.group(1).strip()
+
+    if not name:
+        return None
+
+    phone_raw = ""
+    for line in lines:
+        for match in re.finditer(r"(?<!\d)(?:\+?60|0)1\d(?:[\s().-]*\d){7,8}(?!\d)", line):
+            candidate = match.group(0).strip()
+            if normalize_my_mobile(candidate):
+                phone_raw = candidate
+    if not phone_raw:
+        return None
+
+    amount = labelled_amount
+    if not amount:
+        start = phone_label_index + 1 if phone_label_index >= 0 else name_index + 1
+        for line in lines[max(0, start):]:
+            if normalize_my_mobile(line):
+                continue
+            if re.fullmatch(
+                r"(?i)(?:RM\s*)?\d[\d,.\s]*(?:k|rb|ribu)?",
+                line,
+            ):
+                amount = line.strip()
+                break
+    if not amount:
+        return None
+
+    return f"{name}\n{amount}\n{_newbie_phone_display(phone_raw)}"
+
+
+async def newbie_lead_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require(update, owner=True):
+        return
+    chat = update.effective_chat
+    if not chat or chat.type == "private":
+        await update.effective_message.reply_text("请在新人 Lead 群发送 /newlead")
+        return
+    newbie_lead_set(chat.id, chat.title or str(chat.id), True)
+    await update.effective_message.reply_text(
+        "✅ 已设为当前 New Lead 接收群\n只会收到：姓名、金额、电话"
+    )
+
+
+async def stop_newbie_lead_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require(update, owner=True):
+        return
+    chat = update.effective_chat
+    if not chat or chat.type == "private":
+        return
+    newbie_lead_set(chat.id, chat.title or str(chat.id), False)
+    await update.effective_message.reply_text("⏹ New Lead 已停止")
+
+
+async def newbie_filter_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require(update, owner=True):
+        return
+    chat = update.effective_chat
+    if not chat or chat.type == "private":
+        await update.effective_message.reply_text("请在 Filter 群发送 /newlead_filter")
+        return
+    newbie_filter_set(chat.id, chat.title or str(chat.id), True)
+    await update.effective_message.reply_text(
+        "✅ New Lead Filter 已绑定\n完整表格贴在这里，结果自动发去当前接收群"
+    )
+
+
+async def stop_newbie_filter_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require(update, owner=True):
+        return
+    chat = update.effective_chat
+    if not chat or chat.type == "private":
+        return
+    newbie_filter_set(chat.id, chat.title or str(chat.id), False)
+    await update.effective_message.reply_text("⏹ New Lead Filter 已停止")
+
+
+async def newbie_lead_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    chat = update.effective_chat
+    if not msg or not chat or chat.type == "private" or not newbie_filter_is_active(chat.id):
+        return
+    text = (msg.text or msg.caption or "").strip()
+    if text:
+        card = parse_newbie_lead(text)
+        if card:
+            target = newbie_lead_target()
+            if target:
+                await reliable_send(context.application, int(target["chat_id"]), card)
+    # Bound Filter groups are isolated from every other bot workflow.
+    raise ApplicationHandlerStop
+
+
 async def universal_group_id_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Absolute-priority /group_id router for any private/group/supergroup chat.
     It is intentionally independent of all Lead/Backup/Calculator route logic.
@@ -2217,12 +2374,13 @@ async def universal_group_id_router(update: Update, context: ContextTypes.DEFAUL
         return
 
     route_name = "未绑定 / 未识别"
-    # Company-account groups are fixed routes. They share the same accounting
-    # features, but every ledger row/query remains isolated by this chat_id.
-    if int(chat.id) == -1004482054615:
-        route_name = "公司账本｜公司帐"
-    elif int(chat.id) == -1004444989940:
-        route_name = "公司账本｜裕鑫 and 财富"
+    try:
+        if newbie_filter_is_active(chat.id):
+            route_name = "New Lead Filter"
+        elif newbie_lead_is_active(chat.id):
+            route_name = "New Lead 简洁群"
+    except Exception:
+        pass
     try:
         r = backup_get_route()
         if r:
@@ -2271,10 +2429,13 @@ async def group_id_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     route_name = "未绑定 / 未识别"
-    if int(chat.id) == -1004482054615:
-        route_name = "公司账本｜公司帐"
-    elif int(chat.id) == -1004444989940:
-        route_name = "公司账本｜裕鑫 and 财富"
+    try:
+        if newbie_filter_is_active(chat.id):
+            route_name = "New Lead Filter"
+        elif newbie_lead_is_active(chat.id):
+            route_name = "New Lead 简洁群"
+    except Exception:
+        pass
     try:
         r = backup_get_route()
         if r:
@@ -2788,40 +2949,6 @@ async def backup_message_handler(update: Update, app: Application):
     safe_text = backup_redact_full_text(text)
     mapped = backup_lookup_map(chat.id, msg.message_id)
 
-    has_media = bool(
-        getattr(msg, "photo", None) or getattr(msg, "video", None) or
-        getattr(msg, "animation", None) or getattr(msg, "document", None) or
-        getattr(msg, "audio", None) or getattr(msg, "voice", None) or
-        getattr(msg, "video_note", None) or getattr(msg, "sticker", None)
-    )
-    meaningful_index = any(str(v or "").strip() for v in (data or {}).values())
-
-    # Pure media / ordinary-caption media must still be preserved in 888 backup.
-    # Do not manufacture an empty customer record merely because a video/file
-    # has no NAME/NRIC/Code fields.
-    if has_media and not meaningful_index and not mapped:
-        try:
-            backup_message_id = await backup_copy_single_message(app, route, msg, safe_text)
-            with db() as c:
-                c.execute(
-                    """INSERT INTO backup_message_map(
-                       source_chat_id,source_message_id,backup_chat_id,backup_message_id,
-                       record_id,created_at,updated_at
-                       ) VALUES(?,?,?,?,NULL,?,?)
-                       ON CONFLICT(source_chat_id,source_message_id) DO UPDATE SET
-                         backup_chat_id=excluded.backup_chat_id,
-                         backup_message_id=excluded.backup_message_id,
-                         updated_at=excluded.updated_at""",
-                    (int(chat.id), int(msg.message_id), int(route["backup_chat_id"]),
-                     int(backup_message_id), now_iso(), now_iso()),
-                )
-            backup_queue_delete(chat.id, msg.message_id)
-            return True
-        except Exception:
-            LOG.exception("888 media passthrough to backup failed")
-            await msg.reply_text("⚠️ Backup 媒体复制失败，请确认 Bot 在 backup 群有发送媒体权限。")
-            return True
-
     if mapped:
         # Source message was edited: update the existing permanent backup copy.
         try:
@@ -2860,8 +2987,14 @@ async def backup_message_handler(update: Update, app: Application):
 
     # New source message: copy media/text to permanent backup group.
     try:
-        if has_media:
-            backup_message_id = await backup_copy_single_message(app, route, msg, safe_text)
+        if msg.photo:
+            copied = await app.bot.copy_message(
+                chat_id=route["backup_chat_id"],
+                from_chat_id=chat.id,
+                message_id=msg.message_id,
+                caption=safe_text[:1024],
+            )
+            backup_message_id = copied.message_id
         else:
             sent = await app.bot.send_message(
                 chat_id=route["backup_chat_id"],
@@ -3567,69 +3700,14 @@ async def process_lead(app: Application, data: dict, submitted_by=0, notify_dupl
     name = str(data.get("name") or data.get("full_name") or data.get("customer_name") or "未填写").strip()
     source = str(data.get("source") or data.get("form_name") or data.get("campaign") or "Unknown").strip()
     entry_chat_id = data.get("entry_chat_id")
-
-    # Resolve route + fixed-schema state BEFORE any logic uses it.
-    # Previous builds referenced _fixed_antiscam_occurrence before assignment,
-    # which made duplicate-confirm callbacks fail at send time.
     route_key = inbox_route_get(entry_chat_id) if entry_chat_id else None
     if not route_key:
         route_key = str(data.get("route_key") or "").strip().casefold()
     if route_key not in ("loan", "antiscam"):
         raise RuntimeError(f"Lead route missing for entry_chat_id={entry_chat_id}; refusing cross-route fallback")
-
-    _raw_occurrence = str(data.get("raw_text") or "").strip()
-    _fixed_antiscam_occurrence = bool(
-        route_key == "antiscam"
-        and _raw_occurrence
-        and _s_schema_text(_raw_occurrence) is not None
-    )
-
-    # For the manual anti-scam intake, the CURRENT pasted/filtered Lead is the
-    # authority for Customer Name. A phone may legitimately appear again under
-    # a different name, so never let an older occurrence overwrite this one.
-    if _fixed_antiscam_occurrence:
-        try:
-            _current_phone = _s_normalize_phone(raw_phone) or normalize_phone(raw_phone)
-            _current_fields = _s_manual_fields(_raw_occurrence, _current_phone)
-            _current_name = str(_current_fields.get("name") or "").strip()
-            if _current_name and _current_name not in ("-", "未填写", "未填寫", "未确认", "未確認", "Unconfirmed"):
-                name = _current_name
-                data["name"] = _current_name
-                data["full_name"] = _current_name
-        except Exception:
-            LOG.exception("recover current manual Lead name failed")
-
-    # Fixed-schema anti-scam intake uses two different keys for two different jobs:
-    #   1) Code/external_id identifies the SAME submitted record. If the same Code
-    #      is pasted again, do not create another DB row, do not distribute again,
-    #      and do not inflate today's "来过"/ad statistics.
-    #   2) Phone identifies the same CUSTOMER across different records/Codes. A new
-    #      Code with an old phone is a genuine historical duplicate ("来过").
-    external_id = str(data.get("external_id") or "").strip()
-    if _fixed_antiscam_occurrence and external_id:
-        with db() as c:
-            same_code = c.execute(
-                """SELECT id,phone,team_name,created_at,source,payload
-                   FROM leads WHERE external_id=? ORDER BY id DESC LIMIT 1""",
-                (external_id,),
-            ).fetchone()
-        if same_code:
-            return {
-                "ok": True,
-                "lead_id": int(same_code["id"]),
-                "status": "same_code",
-                "phone": str(same_code["phone"] or phone),
-                "team": same_code["team_name"],
-                "duplicate": None,
-                "external_id": external_id,
-            }
-
     with db() as c:
         old = c.execute(
-            "SELECT id,team_name,created_at,source_created_at,source,payload,external_id,name,phone FROM leads WHERE phone=? ORDER BY id LIMIT 1", (phone,)
-        ).fetchone()
-        previous = c.execute(
-            "SELECT id,team_name,created_at,source_created_at,source,payload,external_id,name,phone FROM leads WHERE phone=? ORDER BY id DESC LIMIT 1", (phone,)
+            "SELECT id,team_name,created_at FROM leads WHERE phone=? ORDER BY id LIMIT 1", (phone,)
         ).fetchone()
     if old:
         # Duplicate leads are still distributed. They are clearly marked as duplicate
@@ -3675,7 +3753,7 @@ async def process_lead(app: Application, data: dict, submitted_by=0, notify_dupl
     )
 
     if (display_text and not _is_loan_lead and not _already_formatted_antiscam
-            and _fixed_antiscam_occurrence):
+            and entry_chat_id and int(entry_chat_id) == S_MANUAL_INBOX_ID):
         display_text = _s_manual_card(display_text, phone)
         _already_formatted_antiscam = True
 
@@ -3756,30 +3834,9 @@ async def process_lead(app: Application, data: dict, submitted_by=0, notify_dupl
         if saved_status:
             status_line = f"\n🏷️ 状态：{status_labels.get(saved_status['status'], saved_status['status'])}"
         if route_key == "antiscam":
-            # Sales staff only need a compact "came before" warning.
-            # Keep the customer's submitted fields/card unchanged below it.
-            prev_row = previous or old
-            try:
-                _old_code, previous_date, previous_platform = _s_row_meta(prev_row)
-            except Exception:
-                previous_date, previous_platform = "-", "未注明"
-            current_platform = str(data.get("source_platform") or "").strip().upper()
-            if current_platform not in ("FB", "TK"):
-                cur_source = str(source or "").strip().casefold()
-                if "tiktok" in cur_source or cur_source in ("t", "tk"):
-                    current_platform = "TK"
-                elif "facebook" in cur_source or cur_source in ("f", "fb"):
-                    current_platform = "FB"
-                else:
-                    current_platform = "未注明"
-            current_date = _s_display_date_from_data(data) or _lead_history_date(now_iso())
-            staff_name = str(data.get("name") or name or "未填写").strip() or "未填写"
-            duplicate_notice = (
-                f"⚠️ 来过客户（{duplicate_times}次）\n"
-                f"{staff_name}｜{phone}\n"
-                f"本次：{current_platform} {current_date}\n"
-                f"上次：{previous_platform} {previous_date}"
-            )
+            # Advertiser-facing intake acknowledgement reports "来过".
+            # Keep the staff card unchanged while continuing distribution.
+            duplicate_notice = status_line
         else:
             duplicate_notice = (
                 f"\n\n⚠️ 重复号码（{duplicate_times}次）"
@@ -3788,11 +3845,10 @@ async def process_lead(app: Application, data: dict, submitted_by=0, notify_dupl
             )
 
         if team:
-            duplicate_body = (duplicate_notice + "\n\n" + msg) if route_key == "antiscam" else (msg + duplicate_notice + team_footer)
             sent_msg = await reliable_send(
                 app,
                 team["chat_id"],
-                duplicate_body,
+                msg + duplicate_notice + team_footer,
             )
             if sent_msg:
                 save_lead_message_map(team["chat_id"], sent_msg.message_id, lead_id, phone)
@@ -3915,528 +3971,6 @@ def _s_today_ad_stats_text(now=None):
     lines.append(f"合计：新资料 {new}｜来过 {came}")
     return "\n".join(lines)
 
-
-def _lead_payload_platform(payload, fallback_source=""):
-    """Return canonical FB/TK/未注明 from a saved Lead payload/source."""
-    try:
-        p = str((payload or {}).get("source_platform") or "").strip().upper()
-    except Exception:
-        p = ""
-    if p in ("FB", "TK"):
-        return p
-    src = str(fallback_source or "").strip().casefold()
-    if "tiktok" in src or src in ("t", "tk"):
-        return "TK"
-    if "facebook" in src or src in ("f", "fb"):
-        return "FB"
-    return "未注明"
-
-
-def _came_query_allowed(chat_id):
-    """Allow duplicate-history reports in any configured antiscam Lead inbox."""
-    try:
-        cid = int(chat_id)
-    except Exception:
-        return False
-    if cid == S_MANUAL_INBOX_ID:
-        return True
-    try:
-        return bool(lead_inbox_is_active(cid) and inbox_route_get(cid) == "antiscam")
-    except Exception:
-        return False
-
-
-def _payload_entry_chat_id(payload):
-    try:
-        return int((payload or {}).get("entry_chat_id") or 0)
-    except Exception:
-        return 0
-
-
-def _came_row_payload(row):
-    try:
-        return json.loads(row["payload"] or "{}")
-    except Exception:
-        return {}
-
-
-def _came_row_code(row, payload=None):
-    payload = payload if isinstance(payload, dict) else _came_row_payload(row)
-    try:
-        code = str(row["external_id"] or payload.get("external_id") or "").strip()
-    except Exception:
-        code = str(payload.get("external_id") or "").strip()
-    return code or "未注明"
-
-
-def _came_row_original_time(row, payload=None):
-    """Prefer the Lead's original supplied time; only fall back to bot-record time."""
-    payload = payload if isinstance(payload, dict) else _came_row_payload(row)
-    try:
-        src = str(row["source_created_at"] or "").strip()
-    except Exception:
-        src = ""
-    if src:
-        value = _lead_history_date(src)
-        if value:
-            return value
-    supplied = str(payload.get("created_time") or "").strip()
-    if supplied:
-        try:
-            dt = datetime.fromisoformat(supplied.replace("Z", "+00:00"))
-            if dt.tzinfo:
-                dt = dt.astimezone(TZ)
-            return dt.strftime("%d/%m/%Y %H:%M:%S")
-        except Exception:
-            return supplied
-    from_raw = _s_date_from_text(payload.get("raw_text"))
-    if from_raw:
-        return from_raw
-    try:
-        return _lead_history_date(row["created_at"]) or str(row["created_at"] or "-")
-    except Exception:
-        return "-"
-
-
-def _came_row_name(c, row, payload, chat_id):
-    """Use the name from THIS Lead occurrence; only fall back when this occurrence truly has none."""
-    name = str(row["name"] or payload.get("name") or payload.get("full_name") or "").strip()
-    if name and name not in ("-", "未填写", "未填寫", "未确认", "未確認", "Unconfirmed"):
-        return name
-    phone = str(row["phone"] or "").strip()
-    if not phone:
-        return "未填写"
-
-    # Older rows may have saved name=未填写 even though the raw Lead text already
-    # contained a name. Recover from that row's own raw text first, so if the
-    # customer changed name between occurrences, each occurrence keeps its own name.
-    try:
-        raw = str(payload.get("raw_text") or "").strip()
-        if raw:
-            fields = _s_manual_fields(raw, phone)
-            raw_name = str(fields.get("name") or "").strip()
-            if raw_name and raw_name not in ("-", "未填写", "未填寫", "未确认", "未確認", "Unconfirmed"):
-                return raw_name
-    except Exception:
-        LOG.exception("recover historical Lead occurrence name failed")
-    candidates = c.execute(
-        """SELECT id,name,payload FROM leads
-           WHERE phone=? AND id<=? ORDER BY id DESC LIMIT 50""",
-        (phone, int(row["id"])),
-    ).fetchall()
-    for cand in candidates:
-        cp = _came_row_payload(cand)
-        n = str(cand["name"] or cp.get("name") or cp.get("full_name") or "").strip()
-        if n and n not in ("-", "未填写", "未填寫"):
-            return n
-    return "未填写"
-
-
-def _s_today_came_rows(chat_id, platform=None, now=None):
-    """Duplicates handled today in this Lead inbox; display original Lead dates, not send dates."""
-    now = now or datetime.now(TZ)
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = start + timedelta(days=1)
-    wanted = str(platform or "").strip().upper()
-    if wanted not in ("FB", "TK", "未注明"):
-        wanted = ""
-    cid = int(chat_id)
-
-    with db() as c:
-        rows = c.execute(
-            """SELECT id,created_at,source_created_at,external_id,name,phone,source,status,payload
-               FROM leads
-               WHERE created_at>=? AND created_at<? AND status='duplicate'
-               ORDER BY id""",
-            (start.isoformat(timespec="seconds"), end.isoformat(timespec="seconds")),
-        ).fetchall()
-
-        out = []
-        for row in rows:
-            payload = _came_row_payload(row)
-            if _payload_entry_chat_id(payload) != cid:
-                continue
-
-            current_platform = _lead_payload_platform(payload, row["source"])
-            if wanted and current_platform != wanted:
-                continue
-
-            current_code = _came_row_code(row, payload)
-            current_time = _came_row_original_time(row, payload)
-            name = _came_row_name(c, row, payload, cid)
-
-            # Find the previous genuine occurrence in the SAME inbox. Skip the same Code,
-            # because a repeated copy of the same Code is not a "来过" occurrence.
-            previous = None
-            previous_payload = {}
-            candidates = c.execute(
-                """SELECT id,created_at,source_created_at,external_id,name,phone,source,payload
-                   FROM leads WHERE phone=? AND id<? ORDER BY id DESC LIMIT 100""",
-                (row["phone"], row["id"]),
-            ).fetchall()
-            for cand in candidates:
-                cp = _came_row_payload(cand)
-                cand_code = _came_row_code(cand, cp)
-                if current_code != "未注明" and cand_code == current_code:
-                    continue
-                previous = cand
-                previous_payload = cp
-                break
-
-            previous_platform = "未注明"
-            previous_time = "-"
-            previous_code = "未注明"
-            if previous:
-                previous_platform = _lead_payload_platform(previous_payload, previous["source"])
-                previous_time = _came_row_original_time(previous, previous_payload)
-                previous_code = _came_row_code(previous, previous_payload)
-
-            # Count genuine occurrences in this inbox. Same-Code copies count once.
-            hist = c.execute(
-                """SELECT id,external_id,payload FROM leads
-                   WHERE phone=? AND id<=? ORDER BY id""",
-                (row["phone"], row["id"]),
-            ).fetchall()
-            seen = set()
-            for h in hist:
-                hp = _came_row_payload(h)
-                hc = _came_row_code(h, hp)
-                key = ("code", hc) if hc != "未注明" else ("row", int(h["id"]))
-                seen.add(key)
-
-            out.append({
-                "id": row["id"],
-                "name": name,
-                "phone": str(row["phone"] or "").strip(),
-                "current_code": current_code,
-                "current_platform": current_platform,
-                "current_time": current_time,
-                "previous_code": previous_code,
-                "previous_platform": previous_platform,
-                "previous_time": previous_time,
-                "times": max(1, len(seen)),
-            })
-    return out
-
-
-def _came_short_date(value):
-    text = str(value or "").strip()
-    if not text or text == "-":
-        return "-"
-    m = re.match(r"^(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", text)
-    return m.group(1).replace("-", "/") if m else text
-
-
-def _s_today_came_text(chat_id, platform=None, now=None, full=False):
-    now = now or datetime.now(TZ)
-    rows = _s_today_came_rows(chat_id, platform, now)
-    label = str(platform or "全部").strip().upper()
-    if label not in ("FB", "TK", "未注明"):
-        label = "全部"
-    mode = "完整版" if full else "简易版"
-    lines = [f"📋 今日来过号码 {now.strftime('%d/%m/%Y')}｜{label}：{len(rows)}｜{mode}"]
-    if not rows:
-        lines.append("今天没有符合条件的来过号码。")
-        return "\n".join(lines)
-
-    for i, r in enumerate(rows, 1):
-        lines.append(f"{i}. {r['phone']}｜{r['name']}")
-        if full:
-            lines.append(f"本次 {r['current_code']}｜{r['current_time']}｜{r['current_platform']}")
-            lines.append(f"上次 {r['previous_code']}｜{r['previous_time']}｜{r['previous_platform']}")
-        else:
-            lines.append(f"本次：{r['current_platform']} {_came_short_date(r['current_time'])}")
-            lines.append(f"上次：{r['previous_platform']} {_came_short_date(r['previous_time'])}")
-        lines.append(f"次数：{r['times']}")
-        lines.append("")
-    if lines and lines[-1] == "":
-        lines.pop()
-    return "\n".join(lines)
-
-
-async def _reply_long_text(msg, text, limit=3900):
-    """Reply in Telegram-safe chunks while keeping one logical list."""
-    if len(text) <= limit:
-        await msg.reply_text(text)
-        return
-    chunk = []
-    size = 0
-    for line in text.splitlines():
-        add = len(line) + 1
-        if chunk and size + add > limit:
-            await msg.reply_text("\n".join(chunk))
-            chunk = []
-            size = 0
-        chunk.append(line)
-        size += add
-    if chunk:
-        await msg.reply_text("\n".join(chunk))
-
-
-def _s_parse_came_query(text):
-    """Recognize 来过 queries, with or without a leading slash."""
-    x = re.sub(r"\s+", " ", str(text or "").strip()).casefold()
-    # Users often type /来过 in Telegram. Treat it exactly like 来过.
-    x = re.sub(r"^/+", "", x).strip()
-    if not x:
-        return None
-    if x in ("来过", "來過"):
-        return ""
-    patterns = (
-        (r"^(?:来过|來過)\s*(?:fb|facebook)$", "FB"),
-        (r"^(?:fb|facebook)\s*(?:来过|來過)$", "FB"),
-        (r"^(?:来过|來過)\s*(?:tk|tiktok)$", "TK"),
-        (r"^(?:tk|tiktok)\s*(?:来过|來過)$", "TK"),
-        (r"^(?:来过|來過)\s*未注明$", "未注明"),
-        (r"^未注明\s*(?:来过|來過)$", "未注明"),
-    )
-    for pattern, value in patterns:
-        if re.match(pattern, x, re.I):
-            return value
-    return None
-
-def _s_source_label_from_data(data):
-    p = str((data or {}).get("source_platform") or "").strip().upper()
-    if p in ("FB", "TK"):
-        return p
-    src = str((data or {}).get("source") or "").strip().casefold()
-    if "tiktok" in src or src in ("t", "tk"):
-        return "TK"
-    if "facebook" in src or src in ("f", "fb"):
-        return "FB"
-    return "未注明"
-
-
-def _s_date_from_text(text):
-    raw = str(text or "")
-    # Keep the actual supplied Lead date/time when one exists.
-    m = re.search(r"(?i)(?<!\d)(\d{1,2}[/-]\d{1,2}[/-]\d{4})(?:[ T]+(\d{1,2}:\d{2}(?::\d{2})?)(?:\s*(AM|PM))?)?", raw)
-    if m:
-        value = m.group(1)
-        if m.group(2):
-            value += " " + m.group(2)
-            if m.group(3):
-                value += " " + m.group(3).upper()
-        return value
-    m = re.search(r"(?i)(?<!\d)(\d{1,2}[/-]\d{1,2}[/-]\d{2})(?:[ T]+(\d{1,2}:\d{2}(?::\d{2})?)(?:\s*(AM|PM))?)?", raw)
-    if m:
-        value = m.group(1)
-        if m.group(2):
-            value += " " + m.group(2)
-            if m.group(3):
-                value += " " + m.group(3).upper()
-        return value
-    return ""
-
-
-def _s_display_date_from_data(data):
-    supplied = str((data or {}).get("created_time") or "").strip()
-    if supplied:
-        try:
-            dt = datetime.fromisoformat(supplied.replace("Z", "+00:00"))
-            if dt.tzinfo:
-                dt = dt.astimezone(TZ)
-            return dt.strftime("%d/%m/%Y %H:%M:%S")
-        except Exception:
-            return supplied
-    from_raw = _s_date_from_text((data or {}).get("raw_text"))
-    return from_raw or datetime.now(TZ).strftime("%d/%m/%Y %H:%M:%S")
-
-
-def _s_row_meta(row):
-    payload = {}
-    try:
-        payload = json.loads(row["payload"] or "{}")
-    except Exception:
-        pass
-    code = str(row["external_id"] or payload.get("external_id") or "未注明").strip() or "未注明"
-    source = _s_source_label_from_data(payload)
-    date = ""
-    try:
-        if row["source_created_at"]:
-            date = _lead_history_date(row["source_created_at"])
-    except Exception:
-        pass
-    if not date:
-        date = _s_display_date_from_data(payload)
-    if not date:
-        date = _lead_history_date(row["created_at"]) or str(row["created_at"] or "-")
-    return code, date, source
-
-
-def _s_duplicate_precheck(data):
-    """Return (kind, previous_row) for S manual intake before anything is inserted/sent."""
-    phone = normalize_phone(str(data.get("phone") or ""))
-    code = str(data.get("external_id") or "").strip()
-    with db() as c:
-        if code:
-            row = c.execute(
-                """SELECT id,created_at,source_created_at,source,payload,external_id,phone,team_chat_id,team_name
-                   FROM leads WHERE external_id=? ORDER BY id DESC LIMIT 1""",
-                (code,),
-            ).fetchone()
-            if row:
-                return "same_code", row
-        row = c.execute(
-            """SELECT id,created_at,source_created_at,source,payload,external_id,phone,team_chat_id,team_name
-               FROM leads WHERE phone=? ORDER BY id DESC LIMIT 1""",
-            (phone,),
-        ).fetchone()
-        if row:
-            return "came", row
-    return None, None
-
-
-def _s_pending_store(chat_id, user_id, kind, old_lead_id, data):
-    with db() as c:
-        cur = c.execute(
-            "INSERT INTO lead_resend_pending(chat_id,requested_by,kind,old_lead_id,data_json,created_at) VALUES(?,?,?,?,?,?)",
-            (int(chat_id), int(user_id), str(kind), int(old_lead_id) if old_lead_id else None,
-             json.dumps(data, ensure_ascii=False), now_iso()),
-        )
-        return int(cur.lastrowid)
-
-
-def _s_pending_markup(pid):
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ 确认发送", callback_data=f"ldconfirm:{int(pid)}"),
-        InlineKeyboardButton("❌ 取消", callback_data=f"ldcancel:{int(pid)}"),
-    ]])
-
-
-def _s_duplicate_confirm_text(kind, previous_row, data):
-    old_code, old_date, old_source = _s_row_meta(previous_row)
-    new_code = str(data.get("external_id") or "未注明").strip() or "未注明"
-    new_date = _s_display_date_from_data(data)
-    new_source = _s_source_label_from_data(data)
-    phone = normalize_phone(str(data.get("phone") or ""))
-    if kind == "same_code":
-        return (
-            "⚠️ 检测到重复 copy（同 Code）\n\n"
-            f"📞 电话：{phone}\n"
-            f"上次 Code：{old_code}\n"
-            f"上次日期：{old_date}\n"
-            f"上次来源：{old_source}\n"
-            f"本次 Code：{new_code}\n"
-            f"本次日期：{new_date}\n"
-            f"本次来源：{new_source}\n\n"
-            "同 Code 不会计算为「来过」。\n是否确认再次发送？"
-        )
-    return (
-        "⚠️ 这个号码以前来过\n\n"
-        f"📞 电话：{phone}\n"
-        f"上次 Code：{old_code}\n"
-        f"上次日期：{old_date}\n"
-        f"上次来源：{old_source}\n"
-        f"本次 Code：{new_code}\n"
-        f"本次日期：{new_date}\n"
-        f"本次来源：{new_source}\n\n"
-        "是否确认再次发送？"
-    )
-
-
-async def _s_send_same_code_confirmed(app, pending_row, data):
-    """Resend a same-Code Lead without inserting another leads row or counting it as 来过."""
-    route_key = str(data.get("route_key") or "antiscam").strip().casefold()
-    team = select_team(route_key)
-    if not team:
-        return False, "还没设置团队群"
-    phone = normalize_phone(str(data.get("phone") or ""))
-    raw = str(data.get("raw_text") or "").strip()
-    body = _s_manual_card(raw, phone) if raw else f"📋 Customer Information (Lead Form)\n\nContact Number: {phone}"
-    body += "\n\n⚠️ 同 Code 重复 copy｜已确认再次发送｜不计来过"
-    sent = await reliable_send(app, team["chat_id"], body[:4096])
-    if sent:
-        old_id = int(pending_row["old_lead_id"] or 0)
-        if old_id:
-            save_lead_message_map(team["chat_id"], sent.message_id, old_id, phone)
-        return True, team["name"]
-    return False, "发送失败"
-
-
-async def lead_duplicate_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    if not q:
-        return
-    try:
-        action, raw_id = (q.data or "").split(":", 1)
-        pid = int(raw_id)
-    except Exception:
-        try:
-            await q.answer("按钮资料无效，请重新贴 Lead。", show_alert=True)
-        except Exception:
-            pass
-        return
-
-    with db() as c:
-        row = c.execute("SELECT * FROM lead_resend_pending WHERE id=?", (pid,)).fetchone()
-
-    if not row:
-        try:
-            await q.answer("这次确认已经失效，请重新贴 Lead。", show_alert=True)
-        except Exception:
-            pass
-        return
-
-    uid = int(update.effective_user.id) if update.effective_user else 0
-    allowed = {int(row["requested_by"])}
-    if OWNER_ID:
-        allowed.add(int(OWNER_ID))
-    if uid not in allowed:
-        try:
-            await q.answer("只有提交这条 Lead 的人可以确认。", show_alert=True)
-        except Exception:
-            pass
-        return
-
-    # Answer exactly once so Telegram Web/Desktop does not leave the button spinning.
-    try:
-        await q.answer("处理中…")
-    except Exception:
-        pass
-
-    if action == "ldcancel":
-        with db() as c:
-            c.execute("DELETE FROM lead_resend_pending WHERE id=?", (pid,))
-        result_text = "❌ 已取消，不发送。"
-    else:
-        try:
-            data = json.loads(row["data_json"] or "{}")
-        except Exception:
-            data = {}
-        try:
-            if row["kind"] == "same_code":
-                ok, info = await _s_send_same_code_confirmed(context.application, row, data)
-                result_text = f"✅ 已确认再次发送 → {info}\n同 Code：不计入「来过」。" if ok else f"⚠️ 未发送：{info}"
-            else:
-                result = await process_lead(
-                    context.application, data,
-                    submitted_by=int(row["requested_by"]), notify_duplicate_owner=False,
-                )
-                if result.get("team"):
-                    result_text = f"✅ 已确认发送｜来过 → {result['team']}"
-                else:
-                    result_text = "⚠️ 已确认，但还没设置团队群。"
-        except Exception:
-            LOG.exception("lead duplicate confirm callback failed pid=%s", pid)
-            result_text = "⚠️ 确认失败，请重新贴这条 Lead 再试。"
-        else:
-            with db() as c:
-                c.execute("DELETE FROM lead_resend_pending WHERE id=?", (pid,))
-
-    # Prefer replacing the confirmation card; if Telegram refuses, send a fallback reply
-    # so a successful click can never look like 'nothing happened'.
-    try:
-        await q.edit_message_text(result_text)
-    except Exception:
-        LOG.exception("lead duplicate confirm edit failed pid=%s", pid)
-        try:
-            if q.message:
-                await q.message.reply_text(result_text)
-        except Exception:
-            LOG.exception("lead duplicate confirm fallback reply failed pid=%s", pid)
-
-
 async def _process_inbox_message(update: Update, application: Application):
     msg = update.effective_message
     chat = update.effective_chat
@@ -4449,25 +3983,12 @@ async def _process_inbox_message(update: Update, application: Application):
     # No OWNER/staff/admin/user-id restriction here.
     if chat.type == "private":
         return
-    text = msg.text or msg.caption or ""
-    smart_schema = bool(
-        _s_schema_text(text) is not None
-        and _s_unwrap_platform(text)[1] in ("FB", "TK")
-    )
-
     route_key = inbox_route_get(chat.id)
     if not route_key:
-        # A complete marked FB/TK row is self-identifying as an antiscam Lead.
-        # This keeps future Lead groups working without hard-coding every chat ID.
-        if smart_schema and int(chat.id) not in {
-            -1003941232666, -1004348567725, -1004482054615, -1004444989940
-        }:
-            route_key = "antiscam"
-        else:
-            # Legacy migration only for previously configured inboxes.
-            if not lead_inbox_is_active(chat.id):
-                return
-            route_key = inbox_route_get(chat.id) or route_key_from_title(chat.title or "")
+        # Legacy migration only for the previously active single inbox.
+        if not lead_inbox_is_active(chat.id):
+            return
+        route_key = inbox_route_get(chat.id) or route_key_from_title(chat.title or "")
     if not user or user.is_bot:
         return
     submitter_name = user.full_name or user.username or str(user.id)
@@ -4479,55 +4000,30 @@ async def _process_inbox_message(update: Update, application: Application):
             (user.id, submitter_name, now_iso()),
         )
 
-    scoped_manual = int(chat.id) == S_MANUAL_INBOX_ID or smart_schema
+    text = msg.text or msg.caption or ""
+    scoped_manual = int(chat.id) == S_MANUAL_INBOX_ID
     phones = _s_lead_phones(text) if scoped_manual else extract_phones(text)
     if not phones:
         return
 
     name = guess_name(text)
-    manual_fields = None
     if scoped_manual and len(phones) == 1:
-        manual_fields = _s_manual_fields(text, phones[0][1])
-        name = manual_fields.get("name", name)
+        name = _s_manual_fields(text, phones[0][1]).get("name", name)
     results = []
     for raw_phone, _normalized in phones:
         try:
-            if scoped_manual:
-                fields = manual_fields if (manual_fields is not None and len(phones) == 1) else _s_manual_fields(text, _normalized)
-                scoped_extra = {
-                    "source_platform": fields.get("platform", "未注明"),
-                    # Code/编号 is deliberately stored as external_id so the same
-                    # pasted record can be ignored without affecting phone history.
-                    "external_id": str(fields.get("reference") or "").strip(),
-                    # Keep the Lead's original/source time separate from Telegram send time.
-                    "created_time": str(fields.get("date") or "").strip(),
-                    # Persist the exact six-column values from THIS occurrence so staff
-                    # cards, history and duplicate checks do not re-guess them later.
-                    "scam_type": str(fields.get("scam_type") or "").strip(),
-                    "amount_lost": str(fields.get("amount") or "").strip(),
-                }
-            else:
-                scoped_extra = {}
-            lead_data = {
-                "name": name,
-                "phone": _normalized if scoped_manual else raw_phone,
-                "source": chat.title or "Telegram入口群",
-                "route_key": route_key,
-                "entry_chat_id": chat.id,
-                "raw_text": text,
-                **scoped_extra,
-            }
-            if scoped_manual:
-                kind, previous_row = _s_duplicate_precheck(lead_data)
-                if kind and previous_row:
-                    pid = _s_pending_store(chat.id, user.id, kind, previous_row["id"], lead_data)
-                    await msg.reply_text(
-                        _s_duplicate_confirm_text(kind, previous_row, lead_data),
-                        reply_markup=_s_pending_markup(pid),
-                    )
-                    return
             result = await process_lead(
-                application, lead_data,
+                application,
+                {
+                    "name": name,
+                    "phone": _normalized if scoped_manual else raw_phone,
+                    "source": chat.title or "Telegram入口群",
+                    "route_key": route_key,
+                    "entry_chat_id": chat.id,
+                    "raw_text": text,
+                    **({"source_platform": _s_manual_fields(text, _normalized)["platform"]}
+                       if scoped_manual else {}),
+                },
                 submitted_by=user.id,
                 notify_duplicate_owner=False,
             )
@@ -4550,11 +4046,6 @@ async def _process_inbox_message(update: Update, application: Application):
     for r in results:
         if r["status"] == "assigned":
             lines.append(f"✅ {r['phone']} → {r['team']}")
-        elif r["status"] == "same_code":
-            code_text = str(r.get("external_id") or "").strip()
-            lines.append(
-                f"⏭️ 同 Code 已处理：{code_text or '未注明'}｜{r['phone']}｜不重复分配、不计来过"
-            )
         elif r["status"] == "duplicate":
             d = r["duplicate"] or {}
             if int(chat.id) == S_MANUAL_INBOX_ID:
@@ -4870,81 +4361,13 @@ def _excel_set_seeded():
         )
 
 
-def _excel_scam_type(row: dict) -> str:
-    """Find Scam Type even when Facebook/Excel changes the exported column label."""
-    aliases = {
-        "bagaimanakah_anda_telah_ditipu",
-        "bagaimanakah_anda_telah_ditipu?",
-        "bagaimanakah anda telah ditipu",
-        "bagaimanakah anda telah ditipu?",
-        "bagaimana anda ditipu",
-        "scam type",
-        "scam_type",
-        "jenis scam",
-        "jenis penipuan",
-        "type of scam",
-    }
-
-    def norm(v):
-        x = str(v or "").strip().lower()
-        x = re.sub(r"[_\-]+", " ", x)
-        x = re.sub(r"[^a-z0-9? ]+", " ", x)
-        return re.sub(r"\s+", " ", x).strip()
-
-    normalized_aliases = {norm(x).rstrip("?") for x in aliases}
-    for k, v in row.items():
-        nk = norm(k).rstrip("?")
-        if nk in normalized_aliases and str(v or "").strip():
-            return str(v).strip()
-
-    for k, v in row.items():
-        nk = norm(k).rstrip("?")
-        if str(v or "").strip() and (
-            "bagaimana anda ditipu" in nk
-            or "bagaimanakah anda telah ditipu" in nk
-            or "scam type" in nk
-            or "jenis scam" in nk
-            or "jenis penipuan" in nk
-            or "type of scam" in nk
-        ):
-            return str(v).strip()
-    return "-"
-
-
-def _excel_get_by_alias(row: dict, aliases, default=""):
-    """Return a value from Excel/Facebook rows using tolerant header matching."""
-    def norm(v):
-        x = str(v or "").strip().lower()
-        x = re.sub(r"[_\-]+", " ", x)
-        x = re.sub(r"[^a-z0-9 ]+", " ", x)
-        return re.sub(r"\s+", " ", x).strip()
-
-    wanted = {norm(a) for a in aliases}
-    for k, v in row.items():
-        if norm(k) in wanted and str(v or "").strip():
-            return str(v).strip()
-    return default
-
-
 def _excel_to_lead(row: dict):
-    # Current Excel layout:
-    # Code | Nama | Nombor WhatsApp | Jumlah wang yang | Bagaimana anda ditipu | Date
-    scam_type = _excel_get_by_alias(row, [
-        "Bagaimana anda ditipu", "Bagaimanakah anda telah ditipu",
-        "Scam Type", "Jenis Scam", "Jenis Penipuan"
-    ], _excel_scam_type(row)) or "-"
-    amount = _excel_get_by_alias(row, [
-        "Jumlah wang yang", "Jumlah wang", "Berapakah jumlah kerugian anda",
-        "Amount Lost", "Amount"
-    ], "-") or "-"
-    email = _excel_get_by_alias(row, ["Email", "E-mail"], "-") or "-"
-    name = _excel_get_by_alias(row, [
-        "Nama", "Full Name", "full_name", "Customer Name", "Name"
-    ], "-") or "-"
-    phone = _excel_get_by_alias(row, [
-        "Nombor WhatsApp", "Nombor Whatsapp", "WhatsApp", "Whatsapp",
-        "Contact Number", "Phone", "Phone Number", "whatsapp_电话号码"
-    ], "")
+    scam_type = str(row.get("bagaimanakah_anda_telah_ditipu?") or "-").strip()
+    amount = str(row.get("berapakah_jumlah_kerugian_anda?") or "-").strip()
+    email = str(row.get("email") or "-").strip()
+    name = str(row.get("full_name") or "-").strip()
+    phone = str(row.get("whatsapp_电话号码") or "").strip()
+    # Excel often converts phone cells to numeric values ending in .0.
     if phone.endswith(".0"):
         phone = phone[:-2]
     card = (
@@ -4962,6 +4385,7 @@ def _excel_to_lead(row: dict):
         "source": "OneDrive Excel Antiscam",
         "route_key": "antiscam",
         "raw_text": card,
+        # Keep these backend-only fields for dedupe/audit/report extensions.
         "external_id": str(row.get("id") or ""),
         "lead_status": row.get("lead_status"),
         "created_time": row.get("created_time"),
@@ -5198,26 +4622,47 @@ async def persist_status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 
-def normalize_my_mobile(raw, allow_missing_trunk=False):
-    """Normalize a Malaysian mobile number to +60 format.
-
-    Normal text scanning stays conservative by default so a numeric Code is not
-    mistaken for a phone.  Callers that are already looking at an explicit phone
-    column/field may set ``allow_missing_trunk=True`` so Excel values such as
-    196025824 are restored to 0196025824 automatically.
+def normalize_my_mobile(raw):
+    """
+    Normalize Malaysian mobile numbers to +60XXXXXXXXX / +60XXXXXXXXXX.
+    Accepts common inputs such as:
+      01XXXXXXXX
+      01XXXXXXXXX
+      601XXXXXXXX
+      601XXXXXXXXX
+      +601XXXXXXXX
+      +601XXXXXXXXX
+    Rejects obvious garbage / non-mobile formats.
     """
     if raw is None:
         return None
-    digits = _clean_phone_digits(raw)
-    if digits.startswith("01") and len(digits) in (10, 11):
+
+    digits = re.sub(r"\D", "", str(raw))
+
+    # Convert local 0-prefix to country code.
+    if digits.startswith("0"):
         digits = "60" + digits[1:]
-    elif allow_missing_trunk and digits.startswith("1") and len(digits) in (9, 10):
-        digits = "60" + digits
-    if not (digits.startswith("601") and len(digits) in (11, 12)):
+
+    # If user omitted + but included MY country code, keep it.
+    if not digits.startswith("60"):
         return None
+
+    # Malaysian mobile numbers should start 601.
+    if not digits.startswith("601"):
+        return None
+
+    # Practical mobile lengths:
+    # +601X... typically 11 or 12 digits including 60.
+    if len(digits) not in (11, 12):
+        return None
+
+    # Reject clearly repetitive garbage such as 111111..., 123123123 etc.
     local = digits[2:]
-    if len(set(local)) <= 2 or re.fullmatch(r"(123)+", local):
+    if len(set(local)) <= 2:
         return None
+    if re.fullmatch(r"(123)+", local):
+        return None
+
     return "+" + digits
 
 
@@ -5227,270 +4672,97 @@ S_MANUAL_INBOX_ID = -1004362293045
 ANTISCAM_STATUS_CHAT_ID = -1003917773643
 
 def _s_normalize_phone(raw):
-    """Normalize S-inbox MY mobile numbers without changing global phone rules.
+    """Accept the redundant local zero after 60 only in the S inbox."""
+    digits = re.sub(r"\D", "", raw or "")
+    if digits.startswith("0060"):
+        digits = digits[2:]
+    if digits.startswith("6001") and len(digits) in (12, 13):
+        digits = "60" + digits[3:]
+    return normalize_my_mobile(digits)
 
-    Besides the normal 01... / 60... forms, the manual F/T sheet can contain
-    a local mobile with the leading zero omitted (for example 196025824).  In
-    that case restore the local zero before handing it to the existing normalizer.
-    """
-    # This function is used only for the explicit S-manual phone position, so the
-    # missing local trunk zero can be restored safely without treating Code as phone.
-    return normalize_my_mobile(raw, allow_missing_trunk=True)
-
-
-
-def _s_platform_marker(value):
-    """Return FB/TK for an explicit small source marker; otherwise None."""
-    value = str(value or '').strip()
-    value = re.sub(r'(?i)^(?:source|platform|来源|來源|平台)\s*[:：]\s*', '', value).strip()
-    key = re.sub(r'\s+', '', value).casefold()
-    if key in ('f', 'fb', 'facebook'):
-        return 'FB'
-    if key in ('t', 'tk', 'tiktok'):
-        return 'TK'
-    return None
 
 
 def _s_unwrap_platform(text):
-    """Detect the user's explicit F/T marker at either edge and remove only that marker.
-
-    Supported examples (case-insensitive):
-      f <record> / t <record>
-      <record> f / <record> t
-      FB / Facebook / TK / TikTok at either edge
-      f1789239814 ... / t1789239814 ...
-      ... 13/09/2026 03:03:34f
-    The rest of the lead is preserved verbatim for the source-specific parser.
-    """
+    """Accept t...t/f...f wrappers and platform letters attached to Code/date."""
     raw = str(text or '').strip()
-    if not raw:
-        return '', None
-
     # Telegram formatting is normally metadata, but tolerate literal Markdown
     # copied through another app by removing paired bold markers per line.
-    cleaned_lines = []
-    for line in raw.replace('\r', '').splitlines():
-        value = line.strip()
-        if value.startswith('**') and value.endswith('**') and len(value) >= 4:
-            value = value[2:-2].strip()
-        cleaned_lines.append(value)
-    raw = '\n'.join(cleaned_lines).strip()
-    marker = None
-
-    # 1) Explicit standalone/word marker at the beginning.
-    # Require a separator after the word marker so names/descriptions are never chopped.
-    m = re.match(r'(?is)^\s*(f|fb|facebook|t|tk|tiktok)(?:\s+|\t+)(.+)$', raw)
-    if m:
-        marker = _s_platform_marker(m.group(1))
-        raw = m.group(2).strip()
-    else:
-        # Also accept F/T attached directly to the numeric record Code.
-        m = re.match(r'(?is)^\s*([ft])(?=\d{8,20}(?:\s|\t|$))', raw)
-        if m:
-            marker = _s_platform_marker(m.group(1))
-            raw = raw[m.end():].strip()
-
-    # 2) Explicit marker at the end. This is the user's normal small-marker layout.
-    # A conflicting second edge marker is not allowed to silently overwrite the first.
-    m = re.search(r'(?is)(?:\s+|\t+)(f|fb|facebook|t|tk|tiktok)\s*$', raw)
-    if m:
-        end_marker = _s_platform_marker(m.group(1))
-        if marker is None or marker == end_marker:
-            marker = end_marker
-            raw = raw[:m.start()].strip()
-    else:
-        # Accept a single F/T attached to the end of a complete date/time.
-        m = re.search(
-            r'(?is)((?:\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})'
-            r'(?:[ T]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s*(?:AM|PM)|Z|[+-]\d{2}:?\d{2})?)?)'
-            r'([ft])\s*$', raw
-        )
-        if m:
-            end_marker = _s_platform_marker(m.group(2))
-            if marker is None or marker == end_marker:
-                marker = end_marker
-                raw = raw[:m.start(2)].strip()
-
-    # 3) Historical wrapper form: same small marker on both ends (f...f / t...t).
-    # This runs only when neither normal edge rule already claimed a marker.
-    if marker is None and len(raw) > 2:
-        first = raw[:1].casefold()
-        last = raw[-1:].casefold()
-        if first == last and first in ('f', 't'):
-            inner = raw[1:-1].strip()
-            # Only treat it as a wrapper when the inner record starts with a numeric Code.
-            if re.match(r'^\d{8,20}(?:\s|\t|$)', inner):
-                marker = 'TK' if first == 't' else 'FB'
-                raw = inner
-
-    # Clean paired Markdown one more time after marker removal.
-    out_lines = []
+    lines = []
     for line in raw.splitlines():
         value = line.strip()
         if value.startswith('**') and value.endswith('**') and len(value) >= 4:
             value = value[2:-2].strip()
-        out_lines.append(value)
-    return '\n'.join(out_lines).strip(), marker
-
+        lines.append(value)
+    raw = '\n'.join(lines).strip()
+    marker = None
+    if '\n' in raw and len(raw) > 2:
+        first, last = raw[0].casefold(), raw[-1].casefold()
+        # The same wrapper at both ends is explicit: t...t or f...f.
+        if first == last and first in ('t', 'f'):
+            marker = 'TK' if first == 't' else 'FB'
+            raw = raw[1:-1].strip()
+        else:
+            first_line, *rest = raw.splitlines()
+            # Also accept t/f attached directly before the numeric Code.
+            match = re.fullmatch(r'([tfTF])(\d{8,20})', first_line.strip())
+            if match:
+                marker = 'TK' if match.group(1).casefold() == 't' else 'FB'
+                raw = '\n'.join([match.group(2)] + rest).strip()
+            # Or attached after a standalone import timestamp.
+            if marker is None:
+                rows = raw.splitlines()
+                match = re.fullmatch(r'(.+?)([tfTF])', rows[-1].strip())
+                if match and _s_metadata_line(match.group(1))[0] == 'date':
+                    marker = 'TK' if match.group(2).casefold() == 't' else 'FB'
+                    rows[-1] = match.group(1)
+                    raw = '\n'.join(rows).strip()
+    # Clean formatting once more after removing an attached wrapper, because
+    # t**Code** becomes **Code** only at this stage.
+    cleaned_lines = []
+    for line in raw.splitlines():
+        value = line.strip()
+        if value.startswith('**') and value.endswith('**') and len(value) >= 4:
+            value = value[2:-2].strip()
+        cleaned_lines.append(value)
+    return '\n'.join(cleaned_lines).strip(), marker
 
 def _s_schema_text(text):
-    """Parse the marked manual row using the fixed business schema.
-
-    Business columns are always:
-      Code | Nama | Nombor WhatsApp | Amount | Scam description | Date
-
-    The user's F/T marker can be before or after the row and is handled first.
-    F means Facebook (FB); T means TikTok (TK).  The two sources therefore never
-    need to guess one another from ad text.  Excel tabs and Telegram-flattened
-    rows separated by 2+ spaces are both accepted.
-    """
+    """One pasted row: Code, Nama, WhatsApp, Amount, Description, Date."""
     cleaned, wrapped_platform = _s_unwrap_platform(text)
-    if not cleaned:
+    if '\t' not in cleaned:
         return None
-
-    # This helper is intentionally only for one fixed manual record. Labelled/multiline
-    # leads continue through the existing parser unchanged.
-    candidate = None
+    import csv
+    rows = list(csv.reader(cleaned.splitlines(), delimiter='\t'))
     markers = [wrapped_platform] if wrapped_platform else []
-
-    if '\t' in cleaned:
-        import csv
-        rows = list(csv.reader(cleaned.splitlines(), delimiter='\t'))
-        for row in rows:
-            cells = [str(value or '').strip() for value in row]
-            while cells and not cells[-1]:
-                cells.pop()
-            if not cells:
-                continue
-            if len(cells) == 1 and _s_metadata_line(cells[0])[0] == 'platform':
-                markers.append(_s_metadata_line(cells[0])[1])
-                continue
-            if cells[0].casefold() == 'code' and len(cells) > 2 and cells[1].casefold() == 'nama':
-                continue
-            # Remove an explicit marker column if clipboard kept it as a cell.
-            if cells and _s_platform_marker(cells[0]):
-                markers.append(_s_platform_marker(cells[0])); cells = cells[1:]
-            if cells and _s_platform_marker(cells[-1]):
-                markers.append(_s_platform_marker(cells[-1])); cells = cells[:-1]
-            if len(cells) < 5 or candidate is not None or not _s_normalize_phone(cells[2]):
-                return None
-            # Any columns after Date must be blank or source-marker metadata only.
-            extras = [value for value in cells[6:] if value]
-            for value in extras:
-                platform = _s_platform_marker(value)
-                if not platform:
-                    return None
-                markers.append(platform)
-            # Fixed business schema tolerates an empty Amount cell. Some clipboard
-            # paths collapse an empty Excel cell, yielding exactly five values:
-            # Code | Name | Phone | Scam description | Date. Keep the positional
-            # meaning instead of shifting every field left.
-            if len(cells) == 5 and re.fullmatch(
-                r'\d{1,2}[/-]\d{1,2}[/-]\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?',
-                cells[4], re.I
-            ):
-                candidate = [cells[0], cells[1], cells[2], '-', cells[3], cells[4]]
-            else:
-                candidate = cells[:6]
-    else:
-        # Telegram may preserve the copied Excel row either as one flattened line
-        # or as one business column per line.  Both layouts use the same fixed schema:
-        # Code | Name | Phone | Amount | Scam description | Date.
-        if '\n' in cleaned:
-            cells = [line.strip() for line in cleaned.splitlines() if line.strip()]
-            if cells and _s_platform_marker(cells[0]):
-                markers.append(_s_platform_marker(cells[0])); cells = cells[1:]
-            if cells and _s_platform_marker(cells[-1]):
-                markers.append(_s_platform_marker(cells[-1])); cells = cells[:-1]
-            if len(cells) < 5 or len(cells) > 6:
-                return None
-            # If Amount was blank, Telegram may collapse the empty line and leave
-            # Code | Name | Phone | Scam description | Date. Reinsert the empty
-            # Amount placeholder so all later fields stay in their fixed columns.
-            if len(cells) == 5 and re.fullmatch(
-                r'\d{1,2}[/-]\d{1,2}[/-]\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?',
-                cells[4], re.I
-            ):
-                cells = [cells[0], cells[1], cells[2], '-', cells[3], cells[4]]
-        else:
-            # In a flattened row, 2+ spaces are normally the clipboard column boundary.
-            cells = [x.strip() for x in re.split(r'\s{2,}', cleaned) if x.strip()]
-            if cells and _s_platform_marker(cells[0]):
-                markers.append(_s_platform_marker(cells[0])); cells = cells[1:]
-            if cells and _s_platform_marker(cells[-1]):
-                markers.append(_s_platform_marker(cells[-1])); cells = cells[:-1]
-
-            # Some Telegram/Excel copies collapse every column separator to ONE space.
-            # Recover only the user's fixed business schema:
-            # Code | Name | Phone | Amount | Scam description | Original date/time.
-            # We anchor on Code + a real MY phone + a trailing date/time, so names and
-            # descriptions keep their exact wording instead of being guessed/re-written.
-            if len(cells) < 5:
-                one = cleaned.strip()
-                code_m = re.match(r'^(\d{6,20})\s+', one)
-                date_m = re.search(
-                    r'(\d{1,2}[/-]\d{1,2}[/-]\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)\s*$',
-                    one, re.I
-                )
-                phone_m = None
-                if code_m and date_m:
-                    middle = one[code_m.end():date_m.start()].strip()
-                    for pm in re.finditer(r'(?<!\d)(?:(?:\+?60)1(?:[ .()-]?\d){8,9}|01(?:[ .()-]?\d){8,9})(?!\d)', middle):
-                        if _s_normalize_phone(pm.group(0)):
-                            phone_m = pm
-                            break
-                    if phone_m:
-                        code = code_m.group(1)
-                        name = middle[:phone_m.start()].strip()
-                        phone = phone_m.group(0).strip()
-                        tail = middle[phone_m.end():].strip()
-                        # Amount is the 4th fixed business column. Do not require RM:
-                        # Forms users often type free-form values such as
-                        # "56ribu ringgit Malaysia", "56 ribu", "56k" or
-                        # "Lebih RM50,000". Preserve the wording exactly and use
-                        # only the following text as the scam-description column.
-                        amount_re = re.compile(
-                            r'(?i)^((?:(?:lebih|hampir|kurang(?:\s+lebih)?|bawah|atas)\s+)?'
-                            # Currency may be written as RM210K, USD80k, MYR 5000,
-                            # SGD1,200, etc. Keep the user's wording unchanged.
-                            r'(?:(?:RM|MYR|USD|SGD|USDT)\s*)?[0-9][0-9,.]*'
-                            r'(?:\s*(?:k|rb|ribu))?'
-                            r'(?:\s+ringgit)?(?:\s+malaysia)?'
-                            r'|banyak\s+juga|banyak|tidak\s+pasti)\s+(.+)$'
-                        )
-                        am = amount_re.match(tail)
-                        if name and am:
-                            amount = am.group(1).strip()
-                            description = am.group(2).strip()
-                            cells = [code, name, phone, amount, description, date_m.group(1).strip()]
-                        elif name and tail:
-                            # Amount is optional in the form. When it is blank,
-                            # preserve the entire post-phone text as the customer's
-                            # scam description instead of abandoning the fixed schema
-                            # and falling back to the old positional formatter.
-                            cells = [code, name, phone, '-', tail, date_m.group(1).strip()]
-        if len(cells) < 5 or not re.fullmatch(r'\d{6,20}', cells[0]) or not _s_normalize_phone(cells[2]):
+    candidate = None
+    for row in rows:
+        cells = [value.strip() for value in row]
+        while cells and not cells[-1]:
+            cells.pop()
+        if not cells:
+            continue
+        if len(cells) == 1 and _s_metadata_line(cells[0])[0] == 'platform':
+            markers.append(cells[0])
+            continue
+        if cells[0].casefold() == 'code' and len(cells) > 2 and cells[1].casefold() == 'nama':
+            continue
+        if len(cells) < 5 or candidate is not None or not _s_normalize_phone(cells[2]):
             return None
+        # The first six columns are the fixed business schema. A platform
+        # marker may also arrive in a later Excel column after blank cells.
+        extras = [value for value in cells[6:] if value]
+        for value in extras:
+            kind, platform = _s_metadata_line(value)
+            if kind != 'platform':
+                return None
+            markers.append(platform)
         candidate = cells[:6]
-
     if not candidate:
         return None
-
-    # Reject conflicting source markers instead of randomly calling Facebook/TikTok.
-    explicit = [m for m in markers if m in ('FB', 'TK')]
-    if explicit and len(set(explicit)) > 1:
-        return None
-    platform = explicit[0] if explicit else None
-
-    code, name, phone, amount, description = candidate[:5]
+    code,name,phone,amount,description = candidate[:5]
     date = candidate[5] if len(candidate) >= 6 else ''
-    parts = ([platform] if platform else []) + [
-        f'编号：{code}',
-        f'Nama: {name}',
-        f'Contact Number: {phone}',
-        f'Jumlah wang yang ditipu: {amount}',
-        f'Bagaimana anda ditipu: {description}',
-    ]
+    parts = markers + [f'编号：{code}', f'Nama: {name}', f'Contact Number: {phone}',
+                       f'Jumlah wang yang ditipu: {amount}', f'Bagaimana anda ditipu: {description}']
     if date:
         parts.append(f'Date: {date}')
     return '\n'.join(parts)
@@ -5543,9 +4815,6 @@ def _s_manual_fields(text, phone):
             used.add(i)
             if kind == 'platform':
                 platforms.add(value)
-            elif kind == 'date' and not fields.get('date'):
-                # Preserve the Lead's own source/original timestamp.
-                fields['date'] = value
     fields['platform'] = next(iter(platforms)) if len(platforms) == 1 else ('待确认' if platforms else '未注明')
     labels = {
         "name": r"customer name|full name|name|nama|姓名|名字",
@@ -5624,42 +4893,6 @@ def extract_and_validate_lead_phone(text):
     """
     if not text:
         return None, None
-
-    # Fixed six-column anti-scam row safety net:
-    #   Code | Nama | Nombor WhatsApp | Amount | Scam description | Date
-    # Even when a future/free-form Amount prevents the full schema parser from
-    # succeeding, the first numeric field is still the Code and must NEVER be
-    # normalized as a Malaysian phone.  Search only after the leading Code and
-    # before the trailing source date; the first valid MY mobile there is the
-    # explicit WhatsApp column.
-    try:
-        _cleaned, _platform = _s_unwrap_platform(text)
-        _code_m = re.match(r'^\s*(\d{6,20})\s+', _cleaned or '')
-        _date_m = re.search(
-            r'(\d{1,2}[/-]\d{1,2}[/-]\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)\s*$',
-            _cleaned or '', re.I
-        )
-        if _code_m and _date_m and _date_m.start() > _code_m.end():
-            _middle = _cleaned[_code_m.end():_date_m.start()]
-            for _pm in re.finditer(r'(?<!\d)(?:(?:\+?60)1(?:[ .()-]?\d){8,9}|01(?:[ .()-]?\d){8,9})(?!\d)', _middle):
-                _raw = _pm.group(0).strip()
-                _norm = normalize_my_mobile(_raw, allow_missing_trunk=False)
-                if _norm:
-                    return _norm, _raw
-    except Exception:
-        LOG.exception("fixed-row phone safety parse failed")
-
-    # An explicit phone label is authoritative.  Here we can safely restore a
-    # leading Malaysian 0 that Excel/Forms dropped, without confusing a Code/ID.
-    labelled = re.search(
-        r"(?im)^\s*(?:contact number|phone(?: number)?|mobile|whatsapp|nombor whatsapp|telefon|tel|电话|電話|手机|手機)\s*[:：=-]\s*(.+?)\s*$",
-        text,
-    )
-    if labelled:
-        raw_labelled = labelled.group(1).strip()
-        normalized = normalize_my_mobile(raw_labelled, allow_missing_trunk=True)
-        if normalized:
-            return normalized, raw_labelled
 
     # Prefer lines/tokens that look phone-ish and are at least 8 digits.
     candidates = re.findall(r"\+?\d[\d\s\-\(\)]{7,16}\d", text)
@@ -5800,74 +5033,6 @@ def _copied_excel_row_to_lead(text: str, entry_chat_id: int):
         "scam_type": scam_type, "amount_lost": amount, "email": email,
     }
 
-async def s_came_query_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """High-priority duplicate lookup for every configured antiscam Lead inbox."""
-    msg = update.effective_message
-    chat = update.effective_chat
-    if not msg or not chat or chat.type == "private":
-        return
-    text = (msg.text or "").strip()
-    came_platform = _s_parse_came_query(text)
-    if came_platform is None:
-        return
-    cid = int(chat.id)
-    if not _came_query_allowed(cid):
-        return
-    await _reply_long_text(msg, _s_today_came_text(cid, came_platform, full=False))
-    raise ApplicationHandlerStop
-
-
-async def s_came_mode_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """完整 or /完整 -> let the requester choose 简易版 or 完整版 themselves."""
-    msg = update.effective_message
-    chat = update.effective_chat
-    user = update.effective_user
-    if not msg or not chat or not user or chat.type == "private":
-        return
-    text = re.sub(r"^/+", "", (msg.text or "").strip())
-    if text not in ("完整", "完整模式", "来过完整", "來過完整"):
-        return
-    cid = int(chat.id)
-    if not _came_query_allowed(cid):
-        return
-    uid = int(user.id)
-    markup = InlineKeyboardMarkup([[
-        InlineKeyboardButton("📄 简易版", callback_data=f"camefmt:s:{uid}"),
-        InlineKeyboardButton("📋 完整版", callback_data=f"camefmt:f:{uid}"),
-    ]])
-    await msg.reply_text("请选择你要查看的来过报表：", reply_markup=markup)
-    raise ApplicationHandlerStop
-
-
-async def s_came_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    if not q or not q.message:
-        return
-    try:
-        _, mode, raw_uid = (q.data or "").split(":", 2)
-        owner_uid = int(raw_uid)
-    except Exception:
-        await q.answer()
-        return
-    click_uid = int(update.effective_user.id) if update.effective_user else 0
-    if click_uid != owner_uid:
-        await q.answer("只有刚才发『完整』的人可以选择。", show_alert=True)
-        return
-    cid = int(q.message.chat.id)
-    if not _came_query_allowed(cid):
-        await q.answer("这个群没有启用来过查询。", show_alert=True)
-        return
-    await q.answer()
-    full = (mode == "f")
-    report = _s_today_came_text(cid, "", full=full)
-    label = "📋 完整版" if full else "📄 简易版"
-    try:
-        await q.edit_message_text(f"✅ 已选择 {label}")
-    except Exception:
-        pass
-    await _reply_long_text(q.message, report)
-
-
 async def lead_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     chat = update.effective_chat
@@ -5877,46 +5042,14 @@ async def lead_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (msg.text or "").strip()
-    if not text:
+    if not text or text.startswith("/"):
         return
 
-    # S inbox quick lookup is normally handled by the high-priority router above.
-    # Keep this fallback for compatibility, including optional leading slash.
-    # This is a read-only query and must run before Lead phone validation.
-    if _came_query_allowed(chat.id):
-        came_platform = _s_parse_came_query(text)
-        if came_platform is not None:
-            await _reply_long_text(msg, _s_today_came_text(chat.id, came_platform, full=False))
-            return
-
-    if text.startswith("/"):
-        return
-
-    # Only ordinary, non-reply Leads.
+    # Only ordinary, non-reply Leads from the configured inbox.
     if msg.reply_to_message:
         return
-
-    # Smart fixed-schema intake: a complete Lead row with an explicit FB/TK marker
-    # may be submitted from any normal Lead group, even before that group is bound.
-    # Business columns are fixed by the user's sheet:
-    # Code | Nama | Nombor WhatsApp | Jumlah wang yang ditipu | Bagaimana anda ditipu | Date.
-    # Protect non-Lead operational groups from accidental intake.
-    _schema_text = _s_schema_text(text)
-    _schema_marker = _s_unwrap_platform(text)[1]
-    _smart_schema_lead = bool(_schema_text and _schema_marker in ("FB", "TK"))
-    _protected_nonlead_chats = {
-        -1003941232666,  # 888 main
-        -1004348567725,  # 888 backup
-        -1004482054615,  # company ledger
-        -1004444989940,  # secondary company ledger
-    }
-    if not lead_inbox_is_active(chat.id) and not (
-        _smart_schema_lead and int(chat.id) not in _protected_nonlead_chats
-    ):
+    if not lead_inbox_is_active(chat.id):
         return
-
-    # Pass the fixed-schema decision to the canonical intake path for this update only.
-    context.chat_data["smart_antiscam_schema"] = _smart_schema_lead
 
     # Claim only after we know this really is a Lead candidate.
     if not lead_once_claim(chat.id, msg.message_id):
@@ -5925,7 +5058,6 @@ async def lead_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Fast manual Excel-row intake: select one whole row in Excel, Copy, paste to the
     # anti-scam inbox. The bot strips ad/platform/status metadata and keeps only the card.
     if (inbox_route_get(chat.id) == "antiscam" and ("\t" in text or re.search(r"(?i)\bfb\b", text))
-            and not _smart_schema_lead
             and not (int(chat.id) == S_MANUAL_INBOX_ID and (
                 _s_schema_text(text) is not None or
                 ("\t" not in text and any(_s_metadata_line(line)[0] == 'platform' for line in text.splitlines()))))):
@@ -6552,37 +5684,7 @@ def calc_init_db():
           codes TEXT, raw_text TEXT, preview_message_id INTEGER,
           status TEXT NOT NULL DEFAULT 'pending', posted_at TEXT
         );
-        CREATE TABLE IF NOT EXISTS calc_chat_message_log(
-          chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL, message_time TEXT NOT NULL,
-          has_digit INTEGER NOT NULL DEFAULT 0, protected INTEGER NOT NULL DEFAULT 0,
-          text_preview TEXT, deleted INTEGER NOT NULL DEFAULT 0,
-          PRIMARY KEY(chat_id,message_id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_calc_chat_message_log_time
-          ON calc_chat_message_log(chat_id,message_time,deleted,has_digit);
-        CREATE TABLE IF NOT EXISTS calc_funder_advances(
-          id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, chat_id INTEGER NOT NULL,
-          user_id INTEGER, funder_tag TEXT NOT NULL, amount TEXT NOT NULL,
-          label TEXT, raw_text TEXT, record_date TEXT NOT NULL,
-          settled INTEGER NOT NULL DEFAULT 0, settlement_entry_id INTEGER,
-          source_entry_id INTEGER UNIQUE
-        );
-        CREATE INDEX IF NOT EXISTS idx_calc_funder_advances_lookup
-          ON calc_funder_advances(chat_id,funder_tag,record_date,settled);
         ''')
-        # L/W Reply-attribution migration. A single Telegram message can contain
-        # multiple dated expense lines, so source_message_id + source_line_no
-        # identifies each advance without duplicating it on repeated replies.
-        adv_cols={r['name'] for r in c.execute('PRAGMA table_info(calc_funder_advances)').fetchall()}
-        if 'source_message_id' not in adv_cols:
-            c.execute('ALTER TABLE calc_funder_advances ADD COLUMN source_message_id INTEGER')
-        if 'source_line_no' not in adv_cols:
-            c.execute('ALTER TABLE calc_funder_advances ADD COLUMN source_line_no INTEGER')
-        if 'settled_at' not in adv_cols:
-            c.execute('ALTER TABLE calc_funder_advances ADD COLUMN settled_at TEXT')
-        c.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_calc_funder_advances_source
-          ON calc_funder_advances(chat_id,source_message_id,source_line_no)
-          WHERE source_message_id IS NOT NULL''')
         # Ledger-date migration: allows a posted entry to be moved to its real accounting date
         # without changing the company balance. Existing rows keep using created_at.
         entry_cols={r['name'] for r in c.execute('PRAGMA table_info(calc_entries)').fetchall()}
@@ -6605,29 +5707,7 @@ def calc_init_db():
         entry_cols={r['name'] for r in c.execute('PRAGMA table_info(calc_entries)').fetchall()}
         if 'batch_id' not in entry_cols:
             c.execute('ALTER TABLE calc_entries ADD COLUMN batch_id TEXT')
-        if 'funder_tag' not in entry_cols:
-            c.execute('ALTER TABLE calc_entries ADD COLUMN funder_tag TEXT')
         c.execute('CREATE INDEX IF NOT EXISTS idx_calc_entries_batch_id ON calc_entries(chat_id,batch_id)')
-        c.execute('CREATE INDEX IF NOT EXISTS idx_calc_entries_funder ON calc_entries(chat_id,funder_tag)')
-        # Backward-safe migration: a formal +/- expense classified L/W is still
-        # outstanding to that funder until the user explicitly settles it. It must
-        # NOT be deducted again on settlement because it already hit company balance.
-        # Settlement ledger entries themselves are not L/W advances.
-        c.execute('''DELETE FROM calc_funder_advances
-            WHERE source_entry_id IN (SELECT id FROM calc_entries WHERE COALESCE(category,'')='垫付结算')''')
-        c.execute('''INSERT OR IGNORE INTO calc_funder_advances
-            (created_at,chat_id,user_id,funder_tag,amount,label,raw_text,record_date,settled,settlement_entry_id,source_entry_id)
-            SELECT created_at,chat_id,user_id,UPPER(funder_tag),amount,COALESCE(label,category,'未注明'),raw_text,
-                   COALESCE(record_date,substr(created_at,1,10)),0,NULL,id
-            FROM calc_entries
-            WHERE UPPER(COALESCE(funder_tag,'')) IN ('L','W')
-              AND COALESCE(category,'')!='垫付结算' ''')
-        # Older builds used settled=1 + settlement_entry_id=source_entry_id merely
-        # to prevent double-deduction. Convert those rows to real outstanding L/W.
-        c.execute('''UPDATE calc_funder_advances
-            SET settled=0, settlement_entry_id=NULL, settled_at=NULL
-            WHERE source_entry_id IS NOT NULL
-              AND settlement_entry_id=source_entry_id''')
         c.execute('CREATE INDEX IF NOT EXISTS idx_calc_cardfee_batch_id ON calc_cardfee_pending(chat_id,batch_id)')
         c.execute("UPDATE calc_cardfee_pending SET batch_id='cf:'||id WHERE batch_id IS NULL OR batch_id='' ")
         # One-time/backward-safe copy of existing staff reports into the multi-company table.
@@ -6644,10 +5724,6 @@ SECONDARY_CALC_CHAT_ID = -1004444989940
 SECONDARY_CALC_NAME = '裕鑫 and 财富'
 # Main company ledger: photo is evidence only; caption drives the accounting entry.
 VOUCHER_CALC_CHAT_ID = -1004482054615
-VOUCHER_CALC_NAME = '公司帐'
-# The accounting feature set is shared by exactly these two chats, while all
-# balances/entries/reports/searches stay isolated by chat_id.
-FIXED_CALC_CHAT_IDS = {VOUCHER_CALC_CHAT_ID, SECONDARY_CALC_CHAT_ID}
 _calc_scope_chat = ContextVar('calc_scope_chat', default=0)
 
 def _raw_calc_get(key, default=None):
@@ -6660,14 +5736,14 @@ def _raw_calc_set(key, value):
         c.execute('INSERT OR REPLACE INTO calc_config(key,value) VALUES(?,?)',(key,str(value)))
 
 def calc_primary_chat_id():
-    # Keep the legacy un-prefixed config namespace permanently attached to
-    # the original main company chat. This prevents a later /calculator_here
-    # call from making another group inherit the main company's balance/config.
-    return VOUCHER_CALC_CHAT_ID
+    try: return int(_raw_calc_get('chat_id','0'))
+    except: return 0
 
 def calc_chat_ids():
-    # Only the two confirmed company-account groups use calculator/accounting.
-    return set(FIXED_CALC_CHAT_IDS)
+    ids={SECONDARY_CALC_CHAT_ID}
+    p=calc_primary_chat_id()
+    if p: ids.add(p)
+    return ids
 
 def calc_scope_chat_id():
     cid=int(_calc_scope_chat.get() or 0)
@@ -6692,175 +5768,13 @@ def calc_company_title(chat_id=None):
     cid=int(chat_id or calc_scope_chat_id() or 0)
     if cid==SECONDARY_CALC_CHAT_ID:
         return SECONDARY_CALC_NAME
-    if cid==VOUCHER_CALC_CHAT_ID:
-        return VOUCHER_CALC_NAME
-    return '公司账'
+    return calc_get('title','公司账') or '公司账'
 
 def is_calc_chat(update):
     if not update.effective_chat: return False
     cid=int(update.effective_chat.id)
     if cid not in calc_chat_ids(): return False
     _calc_scope_chat.set(cid)
-    return True
-
-def _calc_message_local_time(msg):
-    dt=getattr(msg, "date", None)
-    if not dt:
-        return datetime.now(TZ)
-    try:
-        if dt.tzinfo is None:
-            dt=dt.replace(tzinfo=ZoneInfo("UTC"))
-        return dt.astimezone(TZ)
-    except Exception:
-        return datetime.now(TZ)
-
-async def calc_message_audit_router(update, context):
-    # Telegram Bot API cannot browse arbitrary history, so remember company
-    # messages as they arrive. Cleanup protection is evaluated at delete time:
-    # messages with AM/PM are treated as time-class chatter and may be deleted;
-    # otherwise any digit protects the message.
-    chat=update.effective_chat
-    msg=update.effective_message
-    if not chat or not msg or int(chat.id) not in FIXED_CALC_CHAT_IDS:
-        return
-    raw=(msg.text or msg.caption or "")
-    has_digit=1 if re.search(r"\d", raw) else 0
-    user=getattr(msg, "from_user", None)
-    protected=1 if (user is None or bool(getattr(user, "is_bot", False))) else 0
-    dt=_calc_message_local_time(msg)
-    preview=(raw or "[media]")[:300]
-    try:
-        with db() as c:
-            prev=c.execute("SELECT deleted FROM calc_chat_message_log WHERE chat_id=? AND message_id=?",
-                           (int(chat.id),int(msg.message_id))).fetchone()
-            deleted=int(prev["deleted"]) if prev else 0
-            c.execute("""INSERT OR REPLACE INTO calc_chat_message_log
-                (chat_id,message_id,message_time,has_digit,protected,text_preview,deleted)
-                VALUES(?,?,?,?,?,?,?)""",
-                (int(chat.id),int(msg.message_id),dt.strftime("%Y-%m-%d %H:%M:%S"),
-                 has_digit,protected,preview,deleted))
-    except Exception:
-        LOG.exception("company message audit failed")
-
-def _parse_cleanup_cutoff(text):
-    """Parse a user-supplied SAME-DAY cleanup cutoff.
-
-    The cutoff is never hard-coded: whatever valid clock time the user writes is
-    used.  Supported examples include:
-      删除6.00pm的废话 / 删除6.31pm前的对话 / 清除 5pm 前的废话 / 删除 17:35 前消息
-      清除下午5点 / 删除下午5点30 / 清除下午5点半 / 删除晚上6点20的废话
-
-    "删除/清除 + time + 废话" means "delete chatter before that time" even if
-    the user omits the word "前".  This parser only returns a cutoff; the delete
-    routine still protects EVERY message containing at least one digit.
-    """
-    t=(text or "").strip()
-    if not t:
-        return None
-    # Normalize common full-width punctuation/spacing without changing digits.
-    t=(t.replace("：", ":").replace("．", ".").replace("。", ".")
-         .replace("ＡＭ", "AM").replace("ＰＭ", "PM"))
-
-    # Require an explicit cleanup verb so ordinary accounting text can never
-    # accidentally trigger deletion.
-    m=re.match(r"^(清除|删除|刪除)\s*(.+?)\s*$", t, re.I)
-    if not m:
-        return None
-    body=m.group(2).strip()
-
-    # Remove only cleanup wording around the clock expression.  "前" is
-    # optional because users naturally write e.g. 删除6.00pm的废话.
-    body=re.sub(r"\s*(?:以前|之前|前)?\s*(?:的)?\s*(?:废话|廢話|闲聊|閒聊|聊天|对话|對話|消息|訊息)?\s*$", "", body, flags=re.I).strip()
-    if not body:
-        return None
-
-    # Chinese clock forms: 下午5点, 下午5点30, 下午5点30分, 下午5点半.
-    m=re.fullmatch(r"(凌晨|早上|上午|中午|下午|傍晚|晚上)?\s*(\d{1,2})\s*(?:点|點|时|時)\s*(?:(半)|(\d{1,2})\s*(?:分)?)?", body, re.I)
-    if m:
-        part=(m.group(1) or "")
-        h=int(m.group(2))
-        mi=30 if m.group(3) else int(m.group(4) or 0)
-        if part in {"下午","傍晚","晚上"} and h<12:
-            h+=12
-        elif part in {"凌晨","早上","上午"} and h==12:
-            h=0
-        elif part=="中午" and 1 <= h < 12:
-            h+=12
-        return (h,mi) if 0<=h<=23 and 0<=mi<=59 else None
-
-    # 12/24-hour forms: 5pm, 5.00pm, 5:30 PM, 17:35, 17.35.
-    m=re.fullmatch(r"(\d{1,2})(?:\s*[:.]\s*(\d{1,2}))?\s*(am|pm)?", body, re.I)
-    if not m:
-        return None
-    h=int(m.group(1)); mi=int(m.group(2) or 0); ap=(m.group(3) or "").lower()
-    if ap:
-        if not 1<=h<=12:
-            return None
-        if ap=="pm" and h<12:
-            h+=12
-        elif ap=="am" and h==12:
-            h=0
-    return (h,mi) if 0<=h<=23 and 0<=mi<=59 else None
-
-async def _delete_company_chatter_before(update, context, hour, minute):
-    chat=update.effective_chat
-    actor=update.effective_user
-    if not chat or int(chat.id) not in FIXED_CALC_CHAT_IDS:
-        return False
-    if not actor or not (int(actor.id)==int(OWNER_ID) or bot_admin_has(int(actor.id))):
-        await update.effective_message.reply_text("⛔ 只有 Owner / Bot Admin 可以清理群消息。")
-        return True
-    now=datetime.now(TZ)
-    cutoff=now.replace(hour=hour,minute=minute,second=0,microsecond=0)
-    day_start=now.replace(hour=0,minute=0,second=0,microsecond=0)
-    with db() as c:
-        rows=c.execute("""SELECT message_id,has_digit,text_preview FROM calc_chat_message_log
-            WHERE chat_id=? AND deleted=0 AND protected=0
-              AND message_time>=? AND message_time<? ORDER BY message_id""",
-            (int(chat.id),day_start.strftime("%Y-%m-%d %H:%M:%S"),
-             cutoff.strftime("%Y-%m-%d %H:%M:%S"))).fetchall()
-    deleted=0; failed=0; kept_numeric=0
-    for r in rows:
-        mid=int(r["message_id"])
-        if mid==int(update.effective_message.message_id):
-            continue
-        preview=str(r["text_preview"] or "")
-        # Final cleanup rule requested by the user:
-        #   - ANY message containing am/pm is time-class chatter and is deletable,
-        #     even if it also contains dates, RM amounts, codes, or other digits.
-        #   - Without am/pm, ANY digit protects the message.
-        # This is evaluated here (not only when logged) so already-recorded
-        # messages immediately follow the newest rule after deployment.
-        has_ampm=bool(re.search(r"(?i)(?:^|\b)\d{1,2}(?:[:.]\d{1,2})?\s*(?:am|pm)\b", preview))
-        if int(r["has_digit"] or 0) and not has_ampm:
-            kept_numeric+=1
-            continue
-        try:
-            await context.bot.delete_message(chat_id=int(chat.id),message_id=mid)
-            with db() as c:
-                c.execute("UPDATE calc_chat_message_log SET deleted=1 WHERE chat_id=? AND message_id=?",
-                          (int(chat.id),mid))
-            deleted+=1
-            await asyncio.sleep(0.06)
-        except RetryAfter as e:
-            await asyncio.sleep(float(getattr(e,"retry_after",1.0))+0.2)
-            try:
-                await context.bot.delete_message(chat_id=int(chat.id),message_id=mid)
-                with db() as c:
-                    c.execute("UPDATE calc_chat_message_log SET deleted=1 WHERE chat_id=? AND message_id=?",
-                              (int(chat.id),mid))
-                deleted+=1
-            except Exception:
-                failed+=1
-        except Exception:
-            failed+=1
-    msg=(f"🧹 已清理 {cutoff:%H:%M} 前的对话\n"
-         f"删除：{deleted} 条\n"
-         f"数字保护：{kept_numeric} 条\n"
-         "规则：有 am/pm = 时间类可删除；没有 am/pm 且有数字 = 保留。")
-    if failed:
-        msg+=f"\n未能删除：{failed} 条（权限/Telegram限制）"
-    await update.effective_message.reply_text(msg)
     return True
 
 def calc_balance():
@@ -6923,377 +5837,62 @@ def calc_period_bounds(kind, anchor=None):
     else: s=d.replace(month=1,day=1); e=d.replace(month=12,day=31)
     return s,e
 
-def _calc_funder_totals(start_date, end_date, pending_only=False):
-    """Return L/W advance totals for this company only; advances do not affect balance until settlement."""
-    sql="""SELECT UPPER(funder_tag) tag, amount FROM calc_funder_advances
-           WHERE chat_id=? AND UPPER(funder_tag) IN ('L','W')
-             AND record_date BETWEEN ? AND ?"""
-    args=[calc_scope_chat_id(),start_date.isoformat(),end_date.isoformat()]
-    if pending_only:
-        sql += " AND settled=0"
-    with db() as c:
-        rows=c.execute(sql,args).fetchall()
-    out={'L':D('0'),'W':D('0')}
-    for r in rows:
-        out[str(r['tag']).upper()] += D(r['amount'])
-    return {k:money(v) for k,v in out.items()}
-
-def _calc_funder_outstanding_totals(as_of_date=None):
-    """Outstanding L/W carried forward until explicit settlement.
-
-    As-of queries include rows already settled later, so historical /today can
-    still show what was outstanding on that date.
-    """
-    d=as_of_date or datetime.now(TZ).date()
-    cid=calc_scope_chat_id()
-    with db() as c:
-        rows=c.execute("""SELECT funder_tag, amount, settled, settled_at, record_date
-            FROM calc_funder_advances
-            WHERE chat_id=? AND UPPER(funder_tag) IN ('L','W')
-              AND record_date<=?""", (cid,d.isoformat())).fetchall()
-    out={'L':D('0'),'W':D('0')}
-    for r in rows:
-        include = not int(r['settled'] or 0)
-        if not include and r['settled_at']:
-            try:
-                sd=datetime.fromisoformat(str(r['settled_at'])).astimezone(TZ).date()
-                include = sd > d
-            except Exception:
-                include = False
-        if include:
-            out[str(r['funder_tag']).upper()] += D(r['amount'])
-    return {k:money(v) for k,v in out.items()}
-
-
-def _calc_ad_display_total(start_date, end_date):
-    """Advertising total for display, including L/W advance-only rows.
-
-    A row such as ``广告 4160 L`` keeps its original record_date and remains an
-    L advance until settlement, but it must also contribute to the advertising
-    category display.  Advance-only rows never change company balance here.
-    Formal expenses later tagged L/W are excluded from the advance side via
-    source_entry_id so the same money is never counted twice.
-    """
-    cid=calc_scope_chat_id()
-    def is_ad(v):
-        x=re.sub(r'\s+','',str(v or '')).casefold()
-        return ('广告' in x) or ('廣告' in x) or ('ads' in x)
-    total=D('0')
-    with db() as c:
-        formal=c.execute("""SELECT amount,category,label FROM calc_entries
-            WHERE chat_id=? AND kind='expense' AND currency='RM'
-              AND COALESCE(record_date,substr(created_at,1,10)) BETWEEN ? AND ?
-              AND COALESCE(category,'')!='垫付结算'""",
-            (cid,start_date.isoformat(),end_date.isoformat())).fetchall()
-        advances=c.execute("""SELECT amount,label,raw_text FROM calc_funder_advances
-            WHERE chat_id=? AND record_date BETWEEN ? AND ?
-              AND source_entry_id IS NULL""",
-            (cid,start_date.isoformat(),end_date.isoformat())).fetchall()
-    for r in formal:
-        if is_ad(r['category']) or is_ad(r['label']):
-            total += D(r['amount'])
-    for r in advances:
-        if is_ad(r['label']) or is_ad(r['raw_text']):
-            total += D(r['amount'])
-    return money(total)
-
-
-def _calc_funder_day_display_totals(start_date, end_date):
-    """L/W totals for display without double-counting.
-
-    Formal company expenses classified by Reply L/W are read directly from
-    calc_entries.funder_tag. Advance-only rows (no source_entry_id) are read
-    from calc_funder_advances. Settlement entries themselves are excluded so
-    settling an advance never looks like a new advance on the settlement day.
-    """
-    out={'L':D('0'),'W':D('0')}
-    cid=calc_scope_chat_id()
-    with db() as c:
-        formal=c.execute("""SELECT UPPER(funder_tag) tag, amount
-            FROM calc_entries
-            WHERE chat_id=? AND kind='expense' AND currency='RM'
-              AND UPPER(COALESCE(funder_tag,'')) IN ('L','W')
-              AND COALESCE(record_date,substr(created_at,1,10)) BETWEEN ? AND ?
-              AND COALESCE(category,'')!='垫付结算'""",
-            (cid,start_date.isoformat(),end_date.isoformat())).fetchall()
-        advances=c.execute("""SELECT UPPER(funder_tag) tag, amount
-            FROM calc_funder_advances
-            WHERE chat_id=? AND UPPER(funder_tag) IN ('L','W')
-              AND record_date BETWEEN ? AND ?
-              AND source_entry_id IS NULL""",
-            (cid,start_date.isoformat(),end_date.isoformat())).fetchall()
-    for r in list(formal)+list(advances):
-        out[str(r['tag']).upper()] += D(r['amount'])
-    return {k:money(v) for k,v in out.items()}
-
-def _calc_funder_pending_rows(tag, start_date, end_date):
-    with db() as c:
-        return c.execute("""SELECT * FROM calc_funder_advances
-            WHERE chat_id=? AND UPPER(funder_tag)=? AND record_date BETWEEN ? AND ?
-            ORDER BY record_date,created_at,id""",
-            (calc_scope_chat_id(),tag.upper(),start_date.isoformat(),end_date.isoformat())).fetchall()
-
-def calc_funder_report(tag, anchor=None, kind='month'):
-    tag=(tag or '').upper()
-    if tag not in {'L','W'}: return '❌ 只支持 L费用 / W费用'
-    s,e=calc_period_bounds(kind,anchor or datetime.now(TZ).date())
-    rows=_calc_funder_pending_rows(tag,s,e)
-    out=[f'💼 {calc_company_title()}｜{tag}垫付',f'📅 {s.strftime("%d/%m/%Y")} - {e.strftime("%d/%m/%Y")}']
-    if not rows:
-        out += ['', '暂无记录。', '', f'{tag} 垫付 TTL：RM0.00']
-        return '\n'.join(out)
-    total=D('0'); pending=D('0'); out += ['']
-    for i,r in enumerate(rows,1):
-        a=D(r['amount']); total+=a
-        if not int(r['settled'] or 0): pending+=a
-        label=r['label'] or '未注明'
-        mark='✅ 已结算' if int(r['settled'] or 0) else '⏳ 待结算'
-        try: d=datetime.strptime(r['record_date'],'%Y-%m-%d').strftime('%d/%m/%Y')
-        except: d=r['record_date']
-        out.append(f'{i}. RM{money(a):,.2f}｜{label}｜{d}｜{mark}')
-    out += ['', f'{tag} 垫付 TTL：RM{money(total):,.2f}', f'待结算：RM{money(pending):,.2f}', f'共 {len(rows)} 笔']
-    return '\n'.join(out)
-
-def _parse_lw_advance_block(text):
-    """Parse L/W advance text. No leading +/- means advance only, no company balance impact."""
-    raw=(text or '').strip()
-    if not raw: return []
-    # Explicit +/- belongs to the normal ledger, not the advance-only parser.
-    if re.match(r'^\s*[+-]\s*\d', raw):
-        return []
-    today=datetime.now(TZ).date()
-    current_date=today
-    out=[]
-    lines=[x.strip() for x in raw.splitlines() if x.strip()]
-    # Single-line L费用/W费用 form.
-    m=re.fullmatch(r'([LWlw])\s*(?:费用|費用)\s*(?:RM|MYR)?\s*([\d,]+(?:\.\d+)?)\s*(.*?)\s*', raw, re.I)
-    if m:
-        out.append((m.group(1).upper(),money(m.group(2).replace(',','')),clean_label(m.group(3).strip()) if m.group(3).strip() else '未注明',today.isoformat(),raw))
-        return out
-    for line in lines:
-        # Date-only line, e.g. 05/09 or 05/09/2026.
-        dm=re.fullmatch(r'(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?', line)
-        if dm:
-            day,mon=int(dm.group(1)),int(dm.group(2)); yr=dm.group(3)
-            year=today.year if not yr else int(yr) + (2000 if len(yr)==2 else 0)
-            try: current_date=datetime(year,mon,day).date()
-            except ValueError: pass
-            continue
-        # Date may be at the front OR end of the line. Supported examples:
-        #   17-09-2026 topup 30 L
-        #   topup 30 L 17/09/26
-        #   广告4160 L 11-09-2026
-        work=line
-        date_m=re.search(r'(?<!\d)(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?(?!\d)', work)
-        line_date=current_date
-        if date_m:
-            day,mon=int(date_m.group(1)),int(date_m.group(2)); yr=date_m.group(3)
-            year=today.year if not yr else int(yr) + (2000 if len(yr)==2 else 0)
-            try:
-                line_date=datetime(year,mon,day).date()
-                current_date=line_date
-                work=(work[:date_m.start()]+' '+work[date_m.end():]).strip()
-            except ValueError:
-                pass
-        lm=re.fullmatch(r'(.+?)\s+(?:RM|MYR)?\s*([\d,]+(?:\.\d+)?)\s*([LWlw])\s*', work, re.I)
-        if not lm:
-            # Also allow compact forms like 广告4160 L / 车费80 W.
-            lm=re.fullmatch(r'(.+?)(?:RM|MYR)?\s*([\d,]+(?:\.\d+)?)\s*([LWlw])\s*', work, re.I)
-        if not lm: continue
-        label=clean_label((lm.group(1) or '').strip()) or '未注明'
-        amt=money(lm.group(2).replace(',','')); tag=lm.group(3).upper()
-        out.append((tag,amt,label,line_date.isoformat(),line))
-    return out
-
-def _record_lw_advances(update, rows):
-    ids=[]
-    with db() as c:
-        for tag,amt,label,recdate,raw in rows:
-            cur=c.execute("""INSERT INTO calc_funder_advances
-                (created_at,chat_id,user_id,funder_tag,amount,label,raw_text,record_date,settled)
-                VALUES(?,?,?,?,?,?,?,?,0)""",
-                (now_iso(),update.effective_chat.id,update.effective_user.id,tag,str(money(amt)),label,raw,recdate))
-            ids.append(cur.lastrowid)
-    return ids
-
-def _funder_month_total(tag, anchor_date=None, pending_only=False):
-    d=anchor_date or datetime.now(TZ).date()
-    s,e=calc_period_bounds('month',d)
-    totals=_calc_funder_totals(s,e,pending_only=pending_only)
-    return money(totals.get((tag or '').upper(),D('0')))
-
-def _parse_lw_reply_block(text, force_tag):
-    """Parse a replied historical expense block and force every money row to L/W.
-
-    This is intentionally user-directed: Replying the message with L or W is the
-    explicit classification action, so old rows do not need to be retyped.
-    """
-    raw=(text or '').strip(); tag=(force_tag or '').upper()
-    if not raw or tag not in {'L','W'}: return []
-    today=datetime.now(TZ).date(); current_date=today; out=[]
-    lines=[x.strip() for x in raw.splitlines() if x.strip()]
-    for line_no,line in enumerate(lines,1):
-        dm=re.fullmatch(r'(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?',line)
-        if dm:
-            day,mon=int(dm.group(1)),int(dm.group(2)); yr=dm.group(3)
-            year=today.year if not yr else int(yr)+(2000 if len(yr)==2 else 0)
-            try: current_date=datetime(year,mon,day).date()
-            except ValueError: pass
-            continue
-        work=line
-        # Optional date prefix on the same line.
-        dm=re.match(r'^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\s+(.+)$',work)
-        if dm:
-            day,mon=int(dm.group(1)),int(dm.group(2)); yr=dm.group(3)
-            year=today.year if not yr else int(yr)+(2000 if len(yr)==2 else 0)
-            try: current_date=datetime(year,mon,day).date()
-            except ValueError: pass
-            work=dm.group(4).strip()
-        # Existing trailing L/W is just an old/manual classification marker;
-        # the Reply L/W intentionally overrides it.
-        work=re.sub(r'\s+[LWlw]\s*$','',work).strip()
-        # Find the last money-looking token; everything before it is the label.
-        ms=list(re.finditer(r'(?i)(?:RM|MYR)?\s*([0-9][0-9,]*(?:\.\d+)?)',work))
-        if not ms: continue
-        m=ms[-1]
-        try: amt=money(m.group(1).replace(',',''))
-        except Exception: continue
-        label=clean_label(work[:m.start()].strip(' -—_:：')) or '未注明'
-        if amt < 0: amt=-amt
-        if amt == 0: continue
-        out.append((tag,amt,label,current_date.isoformat(),line,line_no))
-    return out
-
-def _record_or_reclassify_lw_reply(update, reply_msg, tag):
-    """Reply one old/new message with L/W: classify all its expense rows once."""
-    chat_id=int(update.effective_chat.id); tag=tag.upper(); src_mid=int(reply_msg.message_id)
-    with db() as c:
-        existing=c.execute('''SELECT id FROM calc_funder_advances
-            WHERE chat_id=? AND source_message_id=? ORDER BY source_line_no,id''',(chat_id,src_mid)).fetchall()
-        if existing:
-            c.execute('UPDATE calc_funder_advances SET funder_tag=? WHERE chat_id=? AND source_message_id=?',(tag,chat_id,src_mid))
-            return len(existing), True, None
-
-    # If the replied message is already a formal +/- ledger entry, only add/change
-    # the funder attribution. Do not deduct company balance again.
-    rr=calc_receipt_entry(update)
-    if rr:
-        eid=int(rr['entry_id'])
-        with db() as c:
-            ent=c.execute('SELECT * FROM calc_entries WHERE id=? AND chat_id=?',(eid,chat_id)).fetchone()
-            if ent:
-                c.execute('UPDATE calc_entries SET funder_tag=? WHERE id=?',(tag,eid))
-                prev=c.execute('SELECT id FROM calc_funder_advances WHERE source_entry_id=?',(eid,)).fetchone()
-                recdate=ent['record_date'] or str(ent['created_at'])[:10]
-                if prev:
-                    c.execute('UPDATE calc_funder_advances SET funder_tag=?,settled=0,settlement_entry_id=NULL,settled_at=NULL WHERE id=?',(tag,int(prev['id'])))
-                else:
-                    c.execute('''INSERT INTO calc_funder_advances
-                        (created_at,chat_id,user_id,funder_tag,amount,label,raw_text,record_date,settled,settlement_entry_id,source_entry_id,source_message_id,source_line_no)
-                        VALUES(?,?,?,?,?,?,?,?,0,NULL,?,?,1)''',
-                        (now_iso(),chat_id,ent['user_id'],tag,str(money(ent['amount'])),ent['label'] or ent['category'] or '未注明',ent['raw_text'],recdate,eid,src_mid))
-                return 1, False, 'formal'
-
-    rtext=(reply_msg.text or reply_msg.caption or '').strip()
-    rows=_parse_lw_reply_block(rtext,tag)
-    if not rows: return 0,False,None
-    with db() as c:
-        for rtag,amt,label,recdate,raw,line_no in rows:
-            old=c.execute('''SELECT id FROM calc_funder_advances
-                WHERE chat_id=? AND source_message_id=? AND source_line_no=?''',(chat_id,src_mid,line_no)).fetchone()
-            if old:
-                c.execute('''UPDATE calc_funder_advances SET funder_tag=?,amount=?,label=?,raw_text=?,record_date=?
-                    WHERE id=?''',(tag,str(money(amt)),label,raw,recdate,int(old['id'])))
-            else:
-                c.execute('''INSERT INTO calc_funder_advances
-                    (created_at,chat_id,user_id,funder_tag,amount,label,raw_text,record_date,settled,source_message_id,source_line_no)
-                    VALUES(?,?,?,?,?,?,?,?,0,?,?)''',
-                    (now_iso(),chat_id,getattr(getattr(reply_msg,'from_user',None),'id',None),tag,str(money(amt)),label,raw,recdate,src_mid,line_no))
-    return len(rows),False,'advance'
-
-def _settle_lw_advances(tag, anchor=None):
-    """Settle every outstanding L/W amount up to the chosen day.
-
-    Advance-only rows become a company expense exactly once. Formal expenses
-    already tagged L/W are only marked settled because they already affected
-    company balance when originally posted.
-    """
-    tag=(tag or '').upper(); cutoff=anchor or datetime.now(TZ).date()
-    with db() as c:
-        rows=c.execute("""SELECT * FROM calc_funder_advances
-            WHERE chat_id=? AND UPPER(funder_tag)=? AND settled=0 AND record_date<=?
-            ORDER BY record_date,id""",
-            (calc_scope_chat_id(),tag,cutoff.isoformat())).fetchall()
-        if not rows: return None,0,D('0')
-        total=sum((D(r['amount']) for r in rows),D('0'))
-        advance_only=[r for r in rows if r['source_entry_id'] is None]
-        expense_total=sum((D(r['amount']) for r in advance_only),D('0'))
-        eid=None
-        if expense_total>0:
-            label=f'{tag}垫付结算 {cutoff:%Y-%m}'
-            cur=c.execute("""INSERT INTO calc_entries
-                (created_at,chat_id,user_id,kind,amount,currency,category,label,raw_text,settled,record_date,funder_tag)
-                VALUES(?,?,?,?,?,'RM',?,?,?,1,?,?)""",
-                (now_iso(),calc_scope_chat_id(),None,'expense',str(money(expense_total)),'垫付结算',label,label,cutoff.isoformat(),tag))
-            eid=cur.lastrowid
-        q=','.join('?' for _ in rows)
-        c.execute(f"UPDATE calc_funder_advances SET settled=1,settlement_entry_id=?,settled_at=? WHERE id IN ({q})",
-                  [eid,now_iso()]+[r['id'] for r in rows])
-    return eid,len(rows),money(total)
-
-
 def calc_summary(kind='day', anchor=None):
     s,e=calc_period_bounds(kind,anchor)
+    start=datetime.combine(s,time.min,tzinfo=TZ).isoformat(); end=datetime.combine(e,time.max,tzinfo=TZ).isoformat()
     with db() as c:
         cid=calc_scope_chat_id()
         rows=c.execute("SELECT * FROM calc_entries WHERE chat_id=? AND COALESCE(record_date,substr(created_at,1,10)) BETWEEN ? AND ? ORDER BY id",(cid,s.isoformat(),e.isoformat())).fetchall()
         staff=c.execute('SELECT * FROM calc_staff_reports_v2 WHERE chat_id=? AND report_date BETWEEN ? AND ? ORDER BY staff',(cid,s.isoformat(),e.isoformat())).fetchall()
-        card_count=c.execute("SELECT COUNT(*) n FROM calc_cardfee_pending WHERE chat_id=? AND status='posted' AND COALESCE(record_date,substr(created_at,1,10)) BETWEEN ? AND ?",(cid,s.isoformat(),e.isoformat())).fetchone()['n']
-    inc=Decimal('0'); exp=Decimal('0'); u=Decimal('0'); inc_cat={}; exp_cat={}
-    funder_totals=_calc_funder_totals(s,e)
+    inc=Decimal('0'); exp=Decimal('0'); u=Decimal('0'); inc_cat={}; exp_cat={}; payer_exp={'L':D('0'),'W':D('0')}
     for r in rows:
         a=D(r['amount']); label=r['label'] or r['category'] or '其他'
         if r['currency']=='U' and not r['settled']:
             u+=a; continue
         if r['currency']!='RM': continue
+        # 公司桶/Company Fund is capital carried forward, not period income.
+        # Keep it in calc_balance(), but exclude it from daily/monthly income statistics.
         label_key=re.sub(r'\s+','',str(label)).casefold()
         if r['kind']=='income' and label_key in {'公司桶','公司资金','公司資金','companyfund','companybucket','openingbalance'}:
             continue
         if r['kind']=='income': inc+=a; inc_cat[label]=inc_cat.get(label,D('0'))+a
-        elif r['kind']=='expense': exp+=a; exp_cat[label]=exp_cat.get(label,D('0'))+a
+        elif r['kind']=='expense':
+            exp+=a; exp_cat[label]=exp_cat.get(label,D('0'))+a
+            pm=re.search(r'｜([LW])$',str(label),re.I)
+            if pm:
+                payer_exp[pm.group(1).upper()]+=a
     title={'day':'日报','week':'周报','month':'月报','year':'年报'}[kind]
     if kind=='day':
-        bal=(calc_balance() if s == datetime.now(TZ).date() else calc_balance_at(s))
-        # /today is a current monthly snapshot for advertising too: keep the
-        # original transaction date, but carry this month's categorized ad
-        # amounts into today's display. L/W advance-only ad rows are display
-        # classification only and never deduct balance here.
-        month_start=s.replace(day=1)
-        ad_rm=_calc_ad_display_total(month_start,s)
-        # L/W is a carried-forward outstanding balance, not a daily counter.
-        # It keeps accumulating across dates until the user explicitly settles.
-        outstanding=_calc_funder_outstanding_totals(s)
-        day_l=money(outstanding.get('L',D('0'))); day_w=money(outstanding.get('W',D('0')))
-        pending_l=day_l; pending_w=day_w
-        out=[f'📊 {calc_company_title()}｜今日账单',f'📅 {s.strftime("%d/%m/%Y")}', '',
-             f'📥 收入：RM{money(inc):,.2f}',f'📤 支出：RM{money(exp):,.2f}',
-             f'📈 净额：{("+" if inc-exp>=0 else "-")}RM{abs(money(inc-exp)):,.2f}',f'🏦 结余：RM{bal:,.2f}', '',
-             f'💼 L垫付：RM{day_l:,.2f}',f'💼 W垫付：RM{day_w:,.2f}',f'⏳ 待结算：RM{money(pending_l+pending_w):,.2f}', '',
-             f'💳 卡费：{int(card_count)} 笔',f'📣 广告费用：RM{money(ad_rm):,.2f}｜广告U：{money(u):,.2f} U']
-        return '\n'.join(out)
-    out=[f'📊 {calc_company_title()}｜公司账{title}',f'📅 {s.strftime("%d/%m/%Y")} - {e.strftime("%d/%m/%Y")}', '',f'📥 收入：RM{money(inc):,.2f}',f'📤 支出：RM{money(exp):,.2f}',f'📈 净额：RM{money(inc-exp):,.2f}',f'🏦 期末结余：RM{calc_balance_at(e):,.2f}',f'📢 广告 U 待结算：{money(u):,.2f} U']
+        out=[f'📊 {calc_company_title()}｜公司账日报',f'📅 {s.strftime("%d/%m/%Y")}', '——————————————',
+             f'🏦 公司资金：RM{(calc_balance() if s == datetime.now(TZ).date() else calc_balance_at(s)):,.2f}' + (' 最新' if s == datetime.now(TZ).date() else ' 当日结余'),'',
+             f'📥 收入：RM{money(inc):,.2f} 今日',f'📤 支出：RM{money(exp):,.2f} 今日',
+             f'📈 净额：RM{money(inc-exp):,.2f} 今日','——————————————',
+             f'📢 广告 U 待结算：{money(u):,.2f} U']
+    else:
+        out=[f'📊 {calc_company_title()}｜公司账{title}',f'📅 {s.strftime("%d/%m/%Y")} - {e.strftime("%d/%m/%Y")}', '',f'📥 收入：RM{money(inc):,.2f}',f'📤 支出：RM{money(exp):,.2f}',f'📈 净额：RM{money(inc-exp):,.2f}',f'🏦 期末结余：RM{calc_balance_at(e):,.2f}',f'📢 广告 U 待结算：{money(u):,.2f} U']
     if inc_cat:
         out += ['', '收入分类：']+[f'• {k}：RM{money(v):,.2f}' for k,v in inc_cat.items()]
     if exp_cat:
         out += ['', '支出分类：']+[f'• {k}：RM{money(v):,.2f}' for k,v in exp_cat.items()]
-    outstanding=_calc_funder_outstanding_totals(e)
-    if funder_totals['L'] or funder_totals['W'] or outstanding['L'] or outstanding['W']:
-        out += ['', '💼 出资/垫付汇总：',
-                f'• 本期 L：RM{money(funder_totals["L"]):,.2f}',
-                f'• 本期 W：RM{money(funder_totals["W"]):,.2f}',
-                f'• 当前未结算 L：RM{money(outstanding["L"]):,.2f}',
-                f'• 当前未结算 W：RM{money(outstanding["W"]):,.2f}',
-                f'• 当前待结算：RM{money(outstanding["L"]+outstanding["W"]):,.2f}']
+    if payer_exp['L'] or payer_exp['W']:
+        paid_total=money(payer_exp['L']+payer_exp['W'])
+        fair=money(paid_total/D('2'))
+        base_share=money((inc-exp)/D('2'))
+        l_adjust=money(payer_exp['L']-fair)
+        w_adjust=money(payer_exp['W']-fair)
+        l_final=money(base_share+l_adjust)
+        w_final=money(base_share+w_adjust)
+        def final_line(person,value):
+            return (f'• {person} 最终应拿：RM{value:,.2f}' if value >= 0
+                    else f'• {person} 最终应补：RM{abs(value):,.2f}')
+        out += [
+            '', '👥 L/W 对扣结算（50/50）：',
+            f"• L 已出：RM{money(payer_exp['L']):,.2f}",
+            f"• W 已出：RM{money(payer_exp['W']):,.2f}",
+            f'• 每人应承担：RM{fair:,.2f}',
+            f'• 公司净额基础应分：每人 RM{base_share:,.2f}',
+            final_line('L',l_final), final_line('W',w_final),
+        ]
     if staff:
         out += ['', '👥 员工结算：']+[f"• {r['staff']}：Sale RM{D(r['sale']):,.2f}｜COM RM{D(r['com20']):,.2f}｜{r['status']}" for r in staff]
     return '\n'.join(out)
@@ -7304,7 +5903,7 @@ def calc_simple_summary(kind='day', anchor=None):
     with db() as c:
         cid=calc_scope_chat_id()
         rows=c.execute("SELECT * FROM calc_entries WHERE chat_id=? AND COALESCE(record_date,substr(created_at,1,10)) BETWEEN ? AND ? ORDER BY id",(cid,s.isoformat(),e.isoformat())).fetchall()
-    inc=Decimal('0'); exp=Decimal('0'); u=Decimal('0'); cats={}; ad_rm=Decimal('0')
+    inc=Decimal('0'); exp=Decimal('0'); u=Decimal('0'); cats={}
     for r in rows:
         a=D(r['amount'])
         if r['currency']=='U' and not r['settled']:
@@ -7315,274 +5914,53 @@ def calc_simple_summary(kind='day', anchor=None):
         if r['kind']=='income' and key_norm in {'公司桶','公司资金','公司資金','companyfund','companybucket','openingbalance'}:
             continue
         if r['kind']=='income': inc+=a
-        elif r['kind']=='expense':
-            exp+=a
-            if key_norm in {'广告','廣告','ads','广告u结算','廣告u結算'}:
-                ad_rm+=a
+        elif r['kind']=='expense': exp+=a
         signed=a if r['kind']=='income' else -a
         cats[key]=cats.get(key,D('0'))+signed
-    # Category display also includes advance-only L/W rows (e.g. 广告 4160 L)
-    # without posting them to company expenses. Exact original record_date is
-    # retained in the advance table.
-    ad_rm=_calc_ad_display_total(s,e)
     title={'day':'今日','week':'本周','month':'本月','year':'今年'}[kind]
     out=[f'📊 {calc_company_title()}｜简易账｜{title}',f'📅 {s.strftime("%d/%m/%Y")} - {e.strftime("%d/%m/%Y")}', '',
          f'📥 收入 TTL：RM{money(inc):,.2f}',f'📤 支出 TTL：RM{money(exp):,.2f}',
          f'📈 净额：{("+" if inc-exp>=0 else "-")}RM{abs(money(inc-exp)):,.2f}',f'🏦 期末结余：RM{calc_balance_at(e):,.2f}']
-    out.append(f'📣 广告费用：RM{money(ad_rm):,.2f}｜广告U：{money(u):,.2f} U')
-    # L/W display totals include BOTH formal expenses later tagged by Reply L/W
-    # and advance-only records. Pending remains advance-only + unsettled.
-    ft_all=_calc_funder_day_display_totals(s,e)
-    ft_pending=_calc_funder_totals(s,e,pending_only=True)
-    if ft_all['L'] or ft_all['W'] or ft_pending['L'] or ft_pending['W']:
-        out += ['', '💼 L/W 出资/垫付：',
-                f'• L：RM{money(ft_all["L"]):,.2f}',
-                f'• W：RM{money(ft_all["W"]):,.2f}',
-                f'• 待结算：RM{money(ft_pending["L"]+ft_pending["W"]):,.2f}']
+    if u: out.append(f'📢 广告 U 待结算：{money(u):,.2f} U')
     if cats:
         out += ['','分类：']
         for k,v in cats.items(): out.append(f'• {k}：{("+" if v>=0 else "-")}RM{abs(money(v)):,.2f}')
     return '\n'.join(out)
 
-def _calc_entry_display_time(row):
-    """Accounting date + original posting time in Malaysia time."""
-    try:
-        ct=datetime.fromisoformat(row['created_at']).astimezone(TZ)
-    except Exception:
-        try:
-            ct=datetime.fromisoformat(str(row['created_at']))
-            if ct.tzinfo is None: ct=ct.replace(tzinfo=TZ)
-            else: ct=ct.astimezone(TZ)
-        except Exception:
-            ct=datetime.now(TZ)
-    rd=(row['record_date'] if 'record_date' in row.keys() and row['record_date'] else ct.date().isoformat())
-    try: dshow=datetime.strptime(rd,'%Y-%m-%d').strftime('%d/%m/%Y')
-    except Exception: dshow=str(rd)
-    return f"{dshow} {ct.strftime('%H:%M')}"
-
-
-def _calc_card_code_lines(start_date, end_date):
-    """Return each posted card code with its amount and accounting date/time."""
-    with db() as c:
-        rows=c.execute("""
-            SELECT id,created_at,record_date,card_details,raw_text
-            FROM calc_cardfee_pending
-            WHERE chat_id=? AND status='posted'
-              AND COALESCE(record_date,substr(created_at,1,10)) BETWEEN ? AND ?
-            ORDER BY COALESCE(record_date,substr(created_at,1,10)),created_at,id
-        """,(calc_scope_chat_id(),start_date.isoformat(),end_date.isoformat())).fetchall()
-    out=[]
-    for r in rows:
-        details=[]
-        try:
-            details=json.loads(r['card_details'] or '[]')
-        except Exception:
-            details=[]
-        # Backward compatibility for old batches that pre-date card_details.
-        if not details:
-            for line in (r['raw_text'] or '').splitlines():
-                d=_parse_card_code_money_line(line)
-                if d and d.get('amount') is not None:
-                    details.append({'code':d['code'],'amount':str(d['amount'])})
-        try:
-            ct=datetime.fromisoformat(r['created_at']).astimezone(TZ)
-        except Exception:
-            ct=datetime.now(TZ)
-        rd=r['record_date'] or ct.date().isoformat()
-        try: when=f"{datetime.strptime(rd,'%Y-%m-%d').strftime('%d/%m/%Y')} {ct.strftime('%H:%M')}"
-        except Exception: when=f"{rd} {ct.strftime('%H:%M')}"
-        for d in details:
-            code=str(d.get('code') or '').strip()
-            try: amt=money(d.get('amount') or 0)
-            except Exception: amt=money(0)
-            if code:
-                out.append((code,amt,when))
-    return out
-
-
-def _calc_compact_entry_note(row):
-    """Keep user-written notes readable without dumping structural card blocks."""
-    raw=(row['raw_text'] or '').strip()
-    if not raw:
-        return ''
-    label=(row['label'] or row['category'] or '').strip()
-    is_card=(row['category'] in ('卡费','卡费 Fee') or label in ('卡费 Gross','卡费 Fee'))
-    if not is_card:
-        # Generic income/expense: what the user typed is the audit note.
-        lines=[x.strip() for x in raw.splitlines() if x.strip()]
-        text=' / '.join(lines)
-        return text[:500] + ('...' if len(text)>500 else '')
-
-    notes=[]
-    for line in (x.strip() for x in raw.splitlines() if x.strip()):
-        if re.fullmatch(r'[-—_=\s]+',line):
-            continue
-        if parse_calc_date_text(line):
-            continue
-        if re.search(r'(?i)卡费\s*(?:RM\s*)?[\d,]+(?:\.\d+)?\s*[xX×]\s*\d+',line):
-            continue
-        if re.match(r'(?i)^\s*T(?:otal)?\s*[:：]',line):
-            continue
-        d=_parse_card_code_money_line(line)
-        if d:
-            note=(d.get('note') or '').strip(' ()（）')
-            if note and note not in notes:
-                notes.append(note)
-            continue
-        if _calc_annotated_money_expression(line) is not None:
-            if line not in notes: notes.append(line)
-    return '；'.join(notes)[:300]
-
-
 def calc_full_ledger(kind='day', anchor=None):
     s,e=calc_period_bounds(kind,anchor)
+    start=datetime.combine(s,time.min,tzinfo=TZ).isoformat(); end=datetime.combine(e,time.max,tzinfo=TZ).isoformat()
     with db() as c:
         cid=calc_scope_chat_id()
         rows=c.execute("SELECT * FROM calc_entries WHERE chat_id=? AND COALESCE(record_date,substr(created_at,1,10)) BETWEEN ? AND ? ORDER BY COALESCE(record_date,substr(created_at,1,10)),created_at,id",(cid,s.isoformat(),e.isoformat())).fetchall()
     inc=Decimal('0'); exp=Decimal('0'); u=Decimal('0')
-    date_text=s.strftime('%d/%m/%Y') if s==e else f'{s.strftime("%d/%m/%Y")} - {e.strftime("%d/%m/%Y")}'
-    out=[f'📒 {calc_company_title()}｜详细总账',f'📅 {date_text}']
-
-    code_lines=_calc_card_code_lines(s,e)
-    if code_lines:
-        out += ['', f'【代号汇总】共 {len(code_lines)} 个']
-        for i,(code,amt,when) in enumerate(code_lines,1):
-            out.append(f'{i}. {code}｜RM{amt:,.2f}｜{when}')
-
-    if rows:
-        out += ['', '【明细】']
-    else:
-        out += ['', '暂无账目记录。']
-
-    seq=0
+    out=[f'📚 {calc_company_title()}｜完整总账｜{s.strftime("%d/%m/%Y")} - {e.strftime("%d/%m/%Y")}', '']
+    if not rows: out.append('暂无账目记录。')
     for r in rows:
         a=D(r['amount']); cur=r['currency']; label=r['label'] or r['category'] or '其他'
-        tm=_calc_entry_display_time(r)
+        try:
+            ct=datetime.fromisoformat(r['created_at']).astimezone(TZ)
+            rd=(r['record_date'] if 'record_date' in r.keys() and r['record_date'] else ct.date().isoformat())
+            tm=f"{datetime.strptime(rd,'%Y-%m-%d').strftime('%d/%m')} {ct.strftime('%H:%M')}"
+        except: tm=str(r['created_at'])[:16]
         sign='+' if r['kind']=='income' else '-'
-        label_key=re.sub(r'\s+','',str(label)).casefold()
-        is_fund=(r['kind']=='income' and label_key in {'公司桶','公司资金','公司資金','companyfund','companybucket','openingbalance'})
-        seq += 1
         if cur=='RM':
-            if r['kind']=='income' and not is_fund: inc+=a
-            elif r['kind']=='expense': exp+=a
-            icon='📥' if r['kind']=='income' else '📤'
-            kind_text='公司资金' if is_fund else ('收入' if r['kind']=='income' else '支出')
-            funder=(str(r['funder_tag']).upper() if 'funder_tag' in r.keys() and r['funder_tag'] else '')
-            funder_text=f'｜{funder}费用' if funder in {'L','W'} else ''
-            out.append(f'{seq}. {icon} {sign}RM{money(a):,.2f}｜{label}｜{kind_text}{funder_text}')
-            out.append(f'   📅 {tm}')
-        elif cur=='U':
-            if not r['settled']: u+=a
-            state='已结算' if r['settled'] else '待结算'
-            out.append(f'{seq}. 📢 {sign}{money(a):,.2f} U｜{label}｜{state}')
-            out.append(f'   📅 {tm}')
-        note=_calc_compact_entry_note(r)
-        if note:
-            out.append(f'   📝 {note}')
-        out.append('')
-
-    # Advance-only L/W rows do not live in calc_entries, so list them here.
-    with db() as c:
-        adv_rows=c.execute("""SELECT * FROM calc_funder_advances
-            WHERE chat_id=? AND UPPER(funder_tag) IN ('L','W')
-              AND record_date BETWEEN ? AND ? AND source_entry_id IS NULL
-            ORDER BY record_date,created_at,id""",
-            (calc_scope_chat_id(),s.isoformat(),e.isoformat())).fetchall()
-    if adv_rows:
-        out += ['', '【L/W 垫付明细】']
-        for i,r in enumerate(adv_rows,1):
-            try:
-                d=datetime.strptime(r['record_date'],'%Y-%m-%d').strftime('%d/%m/%Y')
-            except Exception:
-                d=r['record_date'] or ''
-            mark='✅ 已结算' if int(r['settled'] or 0) else '⏳ 待结算'
-            out.append(f"{i}. {str(r['funder_tag']).upper()}｜RM{money(r['amount']):,.2f}｜{r['label'] or '未注明'}｜{d}｜{mark}")
-
-    ft_all=_calc_funder_day_display_totals(s,e)
-    outstanding=_calc_funder_outstanding_totals(e)
-    if ft_all['L'] or ft_all['W'] or outstanding['L'] or outstanding['W']:
-        out += ['', '【L/W 汇总】',
-                f"本期 L：RM{money(ft_all['L']):,.2f}",
-                f"本期 W：RM{money(ft_all['W']):,.2f}",
-                f"未结算 L：RM{money(outstanding['L']):,.2f}",
-                f"未结算 W：RM{money(outstanding['W']):,.2f}",
-                f"待结算：RM{money(outstanding['L']+outstanding['W']):,.2f}"]
-
-    out += ['【汇总】',f'📥 收入：RM{money(inc):,.2f}',f'📤 支出：RM{money(exp):,.2f}',
-            f'📈 净额：{("+" if inc-exp>=0 else "-")}RM{abs(money(inc-exp)):,.2f}',f'🏦 期末结余：RM{calc_balance_at(e):,.2f}']
-    if u:
-        out.append(f'📢 广告 U 待结算：{money(u):,.2f} U')
-    return '\n'.join(out)
-
-def _calc_extract_query_date(text):
-    """Extract one supported accounting date from a free-text ledger query."""
-    text=(text or '').strip()
-    pats=[r'\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b',r'\b\d{1,2}[-/]\d{1,2}[-/]\d{4}\b']
-    for pat in pats:
-        m=re.search(pat,text)
-        if not m: continue
-        d=parse_calc_date_text(m.group(0))
-        if d:
-            rest=(text[:m.start()]+' '+text[m.end():]).strip()
-            return d,re.sub(r'\s+',' ',rest)
-    return None,text
-
-
-def calc_ledger_search(query, limit=120):
-    """Search this company's ledger using date/code/amount/original note text."""
-    rawq=(query or '').strip()
-    qdate,term=_calc_extract_query_date(rawq)
-    term=term.strip()
-    term_fold=term.casefold()
-    with db() as c:
-        sql="SELECT * FROM calc_entries WHERE chat_id=?"
-        params=[calc_scope_chat_id()]
-        if qdate:
-            sql += " AND COALESCE(record_date,substr(created_at,1,10))=?"
-            params.append(qdate.isoformat())
-        sql += " ORDER BY COALESCE(record_date,substr(created_at,1,10)) DESC, created_at DESC, id DESC LIMIT 500"
-        rows=c.execute(sql,params).fetchall()
-    matched=[]
-    for r in rows:
-        if term_fold:
-            hay=' | '.join(str(r[k] or '') for k in ('amount','currency','category','label','raw_text','record_date','created_at','batch_id','funder_tag') if k in r.keys()).casefold()
-            if 'funder_tag' in r.keys() and r['funder_tag']:
-                hay += ' | ' + str(r['funder_tag']).casefold() + '费用'
-            # numeric amount query: allow 1,200 / 1200 / RM1200 to hit the same amount
-            compact_q=re.sub(r'(?i)[^0-9.]','',term)
-            compact_h=re.sub(r'(?i)[^0-9.]','',hay)
-            if term_fold not in hay and not (compact_q and compact_q in compact_h):
-                continue
-        matched.append(r)
-        if len(matched)>=limit: break
-    title=f'🔎 {calc_company_title()}｜查询：{rawq or "全部"}'
-    if qdate: title += f'\n📅 {qdate.strftime("%d/%m/%Y")}'
-    out=[title,'━━━━━━━━━━']
-    if not matched:
-        out.append('没有找到对应账目。')
-        return '\n'.join(out)
-    inc=D('0'); exp=D('0')
-    for i,r in enumerate(matched,1):
-        a=D(r['amount']); sign='+' if r['kind']=='income' else '-'
-        label=r['label'] or r['category'] or '其他'
-        kind_text='收入' if r['kind']=='income' else '支出'
-        if r['currency']=='RM':
             if r['kind']=='income': inc+=a
             elif r['kind']=='expense': exp+=a
-            money_text=f'{sign}RM{money(a):,.2f}'
-        else:
-            money_text=f'{sign}{money(a):,.2f}{r["currency"]}'
-        funder=(str(r['funder_tag']).upper() if 'funder_tag' in r.keys() and r['funder_tag'] else '')
-        funder_text=f'｜{funder}费用' if funder in {'L','W'} else ''
-        out.append(f'{i}. {label}｜{money_text}｜{kind_text}{funder_text}｜{_calc_entry_display_time(r)}')
+            out.append(f'{tm}｜{sign}RM{money(a):,.2f}｜{label}')
+        elif cur=='U':
+            if not r['settled']: u+=a
+            out.append(f'{tm}｜{sign}{money(a):,.2f}U｜{label}{"｜已结算" if r["settled"] else "｜待结算"}')
         raw=(r['raw_text'] or '').strip()
-        if raw:
-            brief=' / '.join(x.strip() for x in raw.splitlines() if x.strip())
-            if len(brief)>280: brief=brief[:277]+'...'
-            if brief.casefold()!=str(label).strip().casefold(): out.append(f'   原文：{brief}')
-        out.append('')
-    out += ['━━━━━━━━━━',f'找到：{len(matched)} 笔',f'收入：RM{money(inc):,.2f}',f'支出：RM{money(exp):,.2f}']
-    if len(matched)>=limit: out.append(f'⚠️ 结果较多，仅显示最近 {limit} 笔。')
+        if (r['category'] in ('卡费','卡费 Fee')) and raw and r['category']=='卡费':
+            codes=[]
+            for line in raw.splitlines():
+                x=re.sub(r'\s+','',line.upper())
+                if re.fullmatch(r'(?:AM|AG|AF|BR|BI|BM|MBB|M|C|B|R|H)\d{4}',x): codes.append(x)
+            if codes: out.append('   Code：'+' / '.join(codes))
+    out += ['', '━━━━━━━━━━',f'收入 TTL：RM{money(inc):,.2f}',f'支出 TTL：RM{money(exp):,.2f}',
+            f'净额：{("+" if inc-exp>=0 else "-")}RM{abs(money(inc-exp)):,.2f}',f'🏦 期末结余：RM{calc_balance_at(e):,.2f}']
+    if u: out.append(f'广告 U 待结算：{money(u):,.2f} U')
     return '\n'.join(out)
 
 def parse_anchor(arg, kind):
@@ -7590,8 +5968,7 @@ def parse_anchor(arg, kind):
     try:
         if kind=='month': return datetime.strptime(arg,'%Y-%m').date()
         if kind=='year': return datetime.strptime(arg,'%Y').date()
-        # Day/week lookups accept both ISO and familiar MY formats.
-        return parse_calc_date_text(arg)
+        return datetime.strptime(arg,'%Y-%m-%d').date()
     except: return None
 
 async def calculator_here_cmd(update, context):
@@ -7601,17 +5978,13 @@ async def calculator_here_cmd(update, context):
         await update.effective_message.reply_text('❌ 请在公司账群使用 /calculator_here'); return
     calc_init_db()
     cid=int(update.effective_chat.id)
-    if cid not in FIXED_CALC_CHAT_IDS:
-        await update.effective_message.reply_text('❌ 这个群不是已确认的公司账群，未进行绑定。')
-        return
-    _calc_scope_chat.set(cid)
-    # Keep config isolated: main uses the legacy main namespace; secondary uses
-    # chat:-1004444989940:* via calc_set(). Never re-point the main namespace.
     if cid==SECONDARY_CALC_CHAT_ID:
+        _calc_scope_chat.set(cid)
         calc_set('title',update.effective_chat.title or SECONDARY_CALC_NAME)
     else:
-        _raw_calc_set('chat_id',VOUCHER_CALC_CHAT_ID)
-        _raw_calc_set('title',update.effective_chat.title or VOUCHER_CALC_NAME)
+        _calc_scope_chat.set(cid)
+        _raw_calc_set('chat_id',cid)
+        _raw_calc_set('title',update.effective_chat.title or '公司账')
     await update.effective_message.reply_text(f'✅ {calc_company_title(cid)} 公司账已绑定\nGroup ID：{cid}\n\n账本与其他公司完全分开。')
 
 async def fund_set_cmd(update, context):
@@ -7639,21 +6012,6 @@ async def calc_report_cmd(update, context, kind):
         await update.effective_message.reply_text('❌ 日期格式错误'); raise ApplicationHandlerStop
     await update.effective_message.reply_text(calc_summary(kind,anchor)); raise ApplicationHandlerStop
 async def calc_today_cmd(u,c): await calc_report_cmd(u,c,'day')
-async def calc_summary_cmd(update, context):
-    if not is_calc_chat(update): return
-    arg=' '.join(context.args).strip() if getattr(context,'args',None) else ''
-    anchor=None
-    if not arg:
-        anchor=datetime.now(TZ).date()
-    else:
-        try:
-            anchor=datetime.strptime(arg,'%Y-%m').date()
-        except Exception:
-            anchor=parse_anchor(arg,'day')
-    if not anchor:
-        await update.effective_message.reply_text('❌ 月份格式：YYYY-MM；也可输入 YYYY-MM-DD 或 DD/MM/YYYY'); return
-    await update.effective_message.reply_text(calc_simple_summary('month',anchor))
-
 async def calc_week_cmd(u,c): await calc_report_cmd(u,c,'week')
 async def calc_month_cmd(u,c): await calc_report_cmd(u,c,'month')
 async def calc_year_cmd(u,c): await calc_report_cmd(u,c,'year')
@@ -7695,6 +6053,65 @@ def classify_expense(label):
     if 'ota' in x: return 'OTA'
     if any(k in x for k in ['广告','廣告','ads']): return '广告'
     return label or '其他支出'
+
+
+def parse_calc_dated_ledger(text):
+    """Parse multi-day ledger blocks such as DD/MM + 车费-60 L/W."""
+    lines=[line.strip() for line in (text or '').splitlines() if line.strip()]
+    if not lines:
+        return None
+    current_date=None
+    saw_date=False
+    entries=[]
+    invalid=[]
+    for line in lines:
+        dm=re.fullmatch(r'(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?',line)
+        if dm:
+            saw_date=True
+            year=int(dm.group(3)) if dm.group(3) else datetime.now(TZ).year
+            if year < 100:
+                year += 2000
+            try:
+                current_date=datetime(year,int(dm.group(2)),int(dm.group(1))).date()
+            except ValueError:
+                invalid.append(line)
+                current_date=None
+            continue
+        if not saw_date or current_date is None:
+            invalid.append(line)
+            continue
+
+        payer=''
+        m=re.fullmatch(r'(.+?)\s*([+-])\s*(?:RM\s*)?([\d,]+(?:\.\d+)?)\s*([LW])?\s*',line,re.I)
+        if m:
+            label,sign,amt,payer=m.group(1),m.group(2),m.group(3),(m.group(4) or '').upper()
+        else:
+            m=re.fullmatch(r'([+-])\s*(?:RM\s*)?([\d,]+(?:\.\d+)?)\s*(.+?)\s*',line,re.I)
+            if not m:
+                invalid.append(line)
+                continue
+            sign,amt,label=m.group(1),m.group(2),m.group(3)
+            pm=re.search(r'(?i)(?:^|\s)([LW])\s*$',label)
+            if pm:
+                payer=pm.group(1).upper()
+                label=label[:pm.start()].strip()
+
+        is_u=bool(re.search(r'(?i)(?:USDT|USD|(?<![A-Z])U(?![A-Z]))',line))
+        label=re.sub(r'(?i)USDT|USD|(?<![A-Z])U(?![A-Z])','',label)
+        base=clean_label(label)
+        shown=f'{base}｜{payer}' if payer else base
+        kind='income' if sign=='+' else 'expense'
+        category=(base if kind=='income' else classify_expense(base))
+        if payer:
+            category=f'{category}｜{payer}'
+        entries.append({
+            'record_date':current_date.isoformat(), 'date_show':current_date.strftime('%d/%m/%Y'),
+            'kind':kind, 'amount':money(amt.replace(',','')), 'currency':'U' if is_u else 'RM',
+            'category':category, 'label':shown, 'payer':payer, 'line':line,
+        })
+    if not saw_date:
+        return None
+    return {'entries':entries,'invalid':invalid}
 
 def parse_staff_report(text):
     if not re.search(r'(?im)^\s*(?:Money|Sale)\s*$',text): return None
@@ -7985,7 +6402,7 @@ async def calc_entry_callback(update, context):
         if not row:
             await q.answer('这笔已经撤销或不存在',show_alert=True); return
         bid=(row['batch_id'] or '') if 'batch_id' in row.keys() else ''
-        if bid.startswith('qfee:'):
+        if bid.startswith(('qfee:','ledgerbatch:')):
             ids=[int(x['id']) for x in c.execute('SELECT id FROM calc_entries WHERE chat_id=? AND batch_id=?',(q.message.chat.id,bid)).fetchall()]
             c.execute('DELETE FROM calc_entries WHERE chat_id=? AND batch_id=?',(q.message.chat.id,bid))
             for rid in ids:
@@ -8084,75 +6501,6 @@ def _parse_card_code_money_line(line):
     note=(m.group(4) or '').strip()
     return {'code':prefix+digits,'prefix':prefix,'bank':_CARD_BANK_NAMES.get(prefix,'未知银行'),'amount':amt,'note':note}
 
-
-
-def _calc_annotated_money_expression(line):
-    """Evaluate RM-labelled arithmetic hidden inside a note line.
-
-    Examples:
-      post RM7.80 + llm RM8      -> 15.80
-      courier RM10 * 2           -> 20.00
-      charge RM30 / 3 + RM2      -> 12.00
-
-    Words between money tokens are ignored, but at least one arithmetic
-    operator must be present. This is intentionally only used for card-fee
-    note lines, never for the card header / code rows / declared Total.
-    """
-    src=(line or '').strip()
-    if not src:
-        return None
-    # Need an RM-labelled amount so ordinary notes/dates/codes cannot become math.
-    if not re.search(r'(?i)\bRM\s*[0-9]', src):
-        return None
-    # Keep RM amounts, plain numeric operands that directly follow an operator,
-    # parentheses and arithmetic operators. Labels such as "post"/"llm" are ignored.
-    parts=[]
-    token_re=re.compile(r'(?i)RM\s*([\d,]+(?:\.\d+)?)|([+\-*/×÷])|([()])|(?<![A-Za-z0-9])([\d,]+(?:\.\d+)?)(?![A-Za-z0-9])')
-    for m in token_re.finditer(src):
-        if m.group(1) is not None:
-            parts.append(m.group(1).replace(',',''))
-        elif m.group(2) is not None:
-            parts.append(m.group(2).replace('×','*').replace('÷','/'))
-        elif m.group(3) is not None:
-            parts.append(m.group(3))
-        elif m.group(4) is not None:
-            # Only accept an unlabelled number when it is an arithmetic operand,
-            # e.g. "RM10 * 2". Do not pull dates/codes into the expression.
-            prev=''.join(parts[-1:])
-            if prev in {'+','-','*','/','('}:
-                parts.append(m.group(4).replace(',',''))
-    expr=' '.join(parts)
-    if not any(op in expr for op in '+-*/'):
-        return None
-    result=calc_eval_expression(expr)
-    if result in (None,'DIV0'):
-        return result
-    return money(result)
-
-def _card_note_math_fee(text):
-    """Return (total, breakdown) for arithmetic note charges in a card-fee block."""
-    total=D('0'); breakdown=[]
-    for raw in (text or '').splitlines():
-        line=raw.strip()
-        if not line:
-            continue
-        # Structural card-fee lines are never treated as extra charges.
-        if re.search(r'(?i)卡费\s*(?:RM\s*)?[\d,]+(?:\.\d+)?\s*[xX×]\s*\d+', line):
-            continue
-        if re.match(r'(?i)^\s*T(?:otal)?\s*[:：]', line):
-            continue
-        if _parse_card_code_money_line(line):
-            continue
-        if re.search(r'(?i)-\s*[\d,]+(?:\.\d+)?\s*fee\b', line):
-            continue
-        val=_calc_annotated_money_expression(line)
-        if val=='DIV0':
-            return 'DIV0', breakdown
-        if val is not None:
-            total += D(val)
-            breakdown.append((line, money(val)))
-    return money(total), breakdown
-
 def _card_record_date_and_label(text):
     """Read an optional date from the first non-empty line; default to MY today."""
     today=datetime.now(TZ).date()
@@ -8181,84 +6529,12 @@ async def calc_text_router(update, context):
     text=(update.effective_message.text or update.effective_message.caption or '').strip()
     if not text: raise ApplicationHandlerStop
 
-    # Safe same-day chatter cleanup, e.g. 清除 5:00pm 前的废话.
-    cutoff_parts=_parse_cleanup_cutoff(text)
-    if cutoff_parts is not None:
-        await _delete_company_chatter_before(update, context, cutoff_parts[0], cutoff_parts[1])
-        raise ApplicationHandlerStop
-
     # Calculator view aliases: Simplified / Traditional / English; English is case-insensitive.
     # Telegram does not support Chinese slash commands reliably, so Chinese aliases are handled as plain text too.
     first, *rest = text.split(maxsplit=1)
     token=first.lstrip('/').strip()
     low=token.lower()
     arg=rest[0].strip() if rest else ''
-
-    # Reply an existing message with just L or W to classify the whole replied
-    # expense record/block without retyping it. Repeating the Reply changes the
-    # classification in-place and never duplicates/deducts the company balance.
-    if re.fullmatch(r'\s*[LWlw]\s*', text) and update.effective_message.reply_to_message:
-        tag=text.strip().upper()
-        n,changed,kind=_record_or_reclassify_lw_reply(update,update.effective_message.reply_to_message,tag)
-        if not n:
-            await update.effective_message.reply_text('⚠️ 这条 Reply 里找不到可归类的费用金额。')
-        else:
-            mtotal=_funder_month_total(tag)
-            if kind=='formal':
-                await update.effective_message.reply_text(
-                    f'✅ 已归类为 {tag} 出资\n这笔原本已是正式公司账，不重复扣余额。\n本月 {tag} 累计：RM{mtotal:,.2f}')
-            else:
-                action='已改为' if changed else '已归类为'
-                await update.effective_message.reply_text(
-                    f'✅ {action} {tag} 垫付\n共 {n} 笔｜未扣公司余额\n本月 {tag} 累计：RM{mtotal:,.2f}')
-        raise ApplicationHandlerStop
-
-    # L/W advance attribution. Without an explicit +/- this records who advanced the money
-    # but DOES NOT change the company balance. Supports new and old formats, including multi-line history.
-    if re.fullmatch(r'\s*([LWlw])\s*(?:费用|費用)\s*', text, re.I):
-        tag=re.fullmatch(r'\s*([LWlw])\s*(?:费用|費用)\s*', text, re.I).group(1).upper()
-        await _reply_long_text(update.effective_message, calc_funder_report(tag))
-        raise ApplicationHandlerStop
-
-    sm=re.fullmatch(r'\s*(?:结算|結算)\s*([LWlw])\s*(?:费用|費用)?\s*|\s*([LWlw])\s*(?:费用|費用)?\s*(?:结算|結算)\s*', text, re.I)
-    if sm:
-        if not (int(update.effective_user.id)==int(OWNER_ID) or bot_admin_has(int(update.effective_user.id))):
-            await update.effective_message.reply_text('⛔ 只有 Owner / Bot Admin 可以结算 L/W 垫付')
-            raise ApplicationHandlerStop
-        tag=(sm.group(1) or sm.group(2)).upper()
-        eid,n,total=_settle_lw_advances(tag)
-        if not eid:
-            await update.effective_message.reply_text(f'ℹ️ {tag} 本月没有待结算垫付。')
-        else:
-            await update.effective_message.reply_text(f'✅ {tag}垫付已结算\n共 {n} 笔｜RM{total:,.2f}\n已正式计入公司支出一次。')
-        raise ApplicationHandlerStop
-
-    advance_rows=_parse_lw_advance_block(text)
-    if advance_rows:
-        _record_lw_advances(update,advance_rows)
-        totals={'L':D('0'),'W':D('0')}
-        for tag,amt,label,recdate,raw in advance_rows: totals[tag]+=D(amt)
-        parts=[f'{k}：RM{money(v):,.2f}' for k,v in totals.items() if v]
-        month_parts=[]
-        for k in ('L','W'):
-            if totals[k]: month_parts.append(f'本月{k}累计：RM{_funder_month_total(k):,.2f}')
-        await update.effective_message.reply_text(
-            '💼 垫付已记录（未扣公司余额）\n'
-            + f'共 {len(advance_rows)} 笔｜' + '｜'.join(parts)
-            + ('\n'+'｜'.join(month_parts) if month_parts else '')
-            + f'\n🏦 公司余额保持：RM{calc_balance():,.2f}\n月尾可用：结算L费用 / 结算W费用')
-        raise ApplicationHandlerStop
-
-    # Universal company-ledger search. In calculator groups, 查/check/find are
-    # ledger queries (date / code / amount / exact user note), so they cannot
-    # collide with the Lead /find handler registered later.
-    if token=='查' or low in {'check','find'}:
-        if not arg:
-            await update.effective_message.reply_text('用法：查 BSN1867 / check 广告费 / find 1200 / 查 11/09/2026 / 查 BSN1867 11/09/2026')
-            raise ApplicationHandlerStop
-        await _reply_long_text(update.effective_message, calc_ledger_search(arg))
-        raise ApplicationHandlerStop
-
     card_simple_alias={'代号','代號','卡代号','卡代號','卡费简易','卡費簡易'}
     card_full_alias={'卡费完整','卡費完整','卡费总账','卡費總賬','卡费大账','卡費大賬'}
     if token in card_simple_alias or low in {'code','codes','codes_simple','card_simple'}:
@@ -8276,22 +6552,15 @@ async def calc_text_router(update, context):
     simple_alias={'简易账','簡易賬','简易帐','簡易帳'}
     full_alias={'总账','總賬','总帐','總帳','大账','大賬','大帐','大帳','账单','賬單'}
     if token in simple_alias or low in {'simple','summary'}:
-        anchor=None
-        if not arg:
-            anchor=datetime.now(TZ).date()
-        else:
-            try:
-                anchor=datetime.strptime(arg,'%Y-%m').date()
-            except Exception:
-                anchor=parse_anchor(arg,'day')
+        anchor=parse_anchor(arg,'day') if arg else datetime.now(TZ).date()
         if not anchor:
-            await update.effective_message.reply_text('❌ 月份格式：YYYY-MM；也可输入日期'); raise ApplicationHandlerStop
-        await update.effective_message.reply_text(calc_simple_summary('month',anchor)); raise ApplicationHandlerStop
+            await update.effective_message.reply_text('❌ 日期格式：YYYY-MM-DD'); raise ApplicationHandlerStop
+        await update.effective_message.reply_text(calc_simple_summary('day',anchor)); raise ApplicationHandlerStop
     if token in full_alias or low in {'full','ledger','bill'}:
         anchor=parse_anchor(arg,'day') if arg else datetime.now(TZ).date()
         if not anchor:
             await update.effective_message.reply_text('❌ 日期格式：YYYY-MM-DD'); raise ApplicationHandlerStop
-        await _reply_long_text(update.effective_message, calc_full_ledger('day',anchor)); raise ApplicationHandlerStop
+        await update.effective_message.reply_text(calc_full_ledger('day',anchor)); raise ApplicationHandlerStop
 
     # Undo a normal +/- ledger entry by replying to its bot receipt or original +/- message.
     if text.casefold() in {'取消','取消记录','取消記錄','cancel','undo'}:
@@ -8302,7 +6571,7 @@ async def calc_text_router(update, context):
                 row=c.execute('SELECT * FROM calc_entries WHERE id=? AND chat_id=?',(eid,update.effective_chat.id)).fetchone()
                 if row:
                     bid=(row['batch_id'] or '') if 'batch_id' in row.keys() else ''
-                    if bid.startswith('qfee:'):
+                    if bid.startswith(('qfee:','ledgerbatch:')):
                         ids=[int(x['id']) for x in c.execute('SELECT id FROM calc_entries WHERE chat_id=? AND batch_id=?',(update.effective_chat.id,bid)).fetchall()]
                         c.execute('DELETE FROM calc_entries WHERE chat_id=? AND batch_id=?',(update.effective_chat.id,bid))
                         for rid in ids:
@@ -8334,49 +6603,54 @@ async def calc_text_router(update, context):
         )
         raise ApplicationHandlerStop
 
-    # Smart dated expense shorthand. A date makes the intent explicit, so a leading '-' is optional.
-    # Supported examples:
-    #   topup 30 17/09/26
-    #   topup 30 17-09-2026
-    #   17/09/2026 topup 30
-    # L/W variants are handled above by the advance parser and do not reach here.
-    dated_work=text
-    dated_m=re.search(r'(?<!\d)(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})(?!\d)', dated_work)
-    if dated_m and not text.startswith(('+','-')):
-        day,mon=int(dated_m.group(1)),int(dated_m.group(2)); yr=int(dated_m.group(3))
-        if yr < 100: yr += 2000
-        try:
-            rec_date=datetime(yr,mon,day).date()
-        except ValueError:
-            rec_date=None
-        if rec_date:
-            without_date=(dated_work[:dated_m.start()]+' '+dated_work[dated_m.end():]).strip()
-            # label amount OR amount label; require some non-numeric label text to avoid treating a bare date+number as an expense.
-            dm_exp=re.fullmatch(r'(.+?)\s+(?:RM|MYR)?\s*([\d,]+(?:\.\d+)?)\s*', without_date, re.I)
-            if not dm_exp:
-                dm_exp=re.fullmatch(r'(?:RM|MYR)?\s*([\d,]+(?:\.\d+)?)\s+(.+?)\s*', without_date, re.I)
-                if dm_exp:
-                    raw_amt,raw_label=dm_exp.group(1),dm_exp.group(2)
-                else:
-                    raw_amt=raw_label=None
-            else:
-                raw_label,raw_amt=dm_exp.group(1),dm_exp.group(2)
-            if raw_amt is not None and raw_label is not None and re.search(r'[A-Za-z\u4e00-\u9fff]', raw_label):
-                amount=money(raw_amt.replace(',',''))
-                label=clean_label(raw_label)
-                category=classify_expense(label)
-                with db() as c:
-                    cur=c.execute("INSERT INTO calc_entries(created_at,chat_id,user_id,kind,amount,currency,category,label,raw_text,settled,record_date) VALUES(?,?,?,?,?,'RM',?,?,?,1,?)",
-                                  (now_iso(),update.effective_chat.id,update.effective_user.id,'expense',str(amount),category,label,text,rec_date.isoformat()))
-                    eid=cur.lastrowid
-                kb=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 撤销此笔',callback_data=f'ceundo:{eid}')]])
-                msg=await update.effective_message.reply_text(
-                    f'✅ 已记录支出：RM{amount:,.2f}｜{label}\n📅 日期：{rec_date.strftime("%d/%m/%Y")}\n🏦 公司资金：RM{calc_balance():,.2f}',
-                    reply_markup=kb)
-                with db() as c:
-                    c.execute('INSERT OR REPLACE INTO calc_entry_receipts(entry_id,chat_id,message_id,source_message_id,created_at) VALUES(?,?,?,?,?)',
-                              (eid,update.effective_chat.id,msg.message_id,update.effective_message.message_id,now_iso()))
-                raise ApplicationHandlerStop
+    # Multi-day expenses/income in one message, e.g.:
+    # 05/09\n车费-60 L\n07/09\n车费-30 W
+    dated = parse_calc_dated_ledger(text)
+    if dated is not None:
+        if dated['invalid']:
+            await update.effective_message.reply_text(
+                '❌ 以下行无法识别，整批没有入账：\n' + '\n'.join(dated['invalid'])
+            )
+            raise ApplicationHandlerStop
+        if not dated['entries']:
+            await update.effective_message.reply_text('❌ 有日期，但没有检测到可入账的金额。')
+            raise ApplicationHandlerStop
+        batch_id=f"ledgerbatch:{update.effective_chat.id}:{update.effective_message.message_id}"
+        entry_ids=[]
+        with db() as c:
+            for item in dated['entries']:
+                cur=c.execute(
+                    """INSERT INTO calc_entries(
+                         created_at,chat_id,user_id,kind,amount,currency,category,
+                         label,raw_text,settled,record_date,batch_id
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (now_iso(),update.effective_chat.id,update.effective_user.id,
+                     item['kind'],str(item['amount']),item['currency'],item['category'],
+                     item['label'],text,0 if item['currency']=='U' else 1,
+                     item['record_date'],batch_id),
+                )
+                entry_ids.append(int(cur.lastrowid))
+        lines=[]
+        for item in dated['entries']:
+            sign='+' if item['kind']=='income' else '-'
+            unit='U' if item['currency']=='U' else 'RM'
+            lines.append(f"{item['date_show']}｜{sign}{unit}{item['amount']:,.2f}｜{item['label']}")
+        first_id=entry_ids[0]
+        kb=InlineKeyboardMarkup([[
+            InlineKeyboardButton('↩️ 撤销整批',callback_data=f'ceundo:{first_id}')
+        ]])
+        receipt=await update.effective_message.reply_text(
+            f"✅ 已自动记录 {len(entry_ids)} 笔\n\n" + '\n'.join(lines) +
+            f"\n\n🏦 公司资金：RM{calc_balance():,.2f}",
+            reply_markup=kb,
+        )
+        with db() as c:
+            c.execute(
+                'INSERT OR REPLACE INTO calc_entry_receipts(entry_id,chat_id,message_id,source_message_id,created_at) VALUES(?,?,?,?,?)',
+                (first_id,update.effective_chat.id,receipt.message_id,
+                 update.effective_message.message_id,now_iso()),
+            )
+        raise ApplicationHandlerStop
 
     # Pure arithmetic is calculator-only. A leading + or - is the explicit ledger signal.
     if not text.startswith(('+','-')):
@@ -8437,12 +6711,7 @@ async def calc_text_router(update, context):
             raise ApplicationHandlerStop
 
         fm = re.search(r'(?i)-\s*([\d,]+(?:\.\d+)?)\s*fee\b', text)
-        explicit_fee = money(fm.group(1).replace(',','')) if fm else money('0')
-        note_fee, note_fee_breakdown = _card_note_math_fee(text)
-        if note_fee == 'DIV0':
-            await update.effective_message.reply_text('❌ 费用算式不能除以 0。')
-            raise ApplicationHandlerStop
-        fee = money(explicit_fee + D(note_fee))
+        fee = money(fm.group(1).replace(',','')) if fm else money('0')
         net=money(gross-fee)
         if fee < 0 or fee > gross:
             await update.effective_message.reply_text('❌ Fee 金额不正确。')
@@ -8461,11 +6730,8 @@ async def calc_text_router(update, context):
                       (f'cf:{pid}', update.effective_message.message_id, pid))
         kb=InlineKeyboardMarkup([[InlineKeyboardButton('✅ 确认入账',callback_data=f'cfok:{pid}'),InlineKeyboardButton('❌ 取消',callback_data=f'cfcancel:{pid}')]])
         title=f"💳 卡处理｜{record_date}" + (f"｜{customer_label}" if customer_label else '')
-        fee_calc=''
-        if note_fee_breakdown:
-            fee_calc='\n费用自动计算：' + ' + '.join(f'RM{v:,.2f}' for _,v in note_fee_breakdown) + f' = RM{D(note_fee):,.2f}'
         msg=await update.effective_message.reply_text(
-            f'{title}\n⏳ 待确认\n\n{detail}\n\n处理卡数：{len(details)}\nGross：RM{gross:,.2f}\nFee：-RM{fee:,.2f}\nNet：RM{net:,.2f}{fee_calc}\n\n1 = 确认入账\n2 = 取消',
+            f'{title}\n⏳ 待确认\n\n{detail}\n\n处理卡数：{len(details)}\nGross：RM{gross:,.2f}\nFee：-RM{fee:,.2f}\nNet：RM{net:,.2f}\n\n1 = 确认入账\n2 = 取消',
             reply_markup=kb)
         with db() as c:
             c.execute('UPDATE calc_cardfee_pending SET preview_message_id=? WHERE id=?',(msg.message_id,pid))
@@ -8524,8 +6790,7 @@ async def calc_text_router(update, context):
         if total<=0: await update.effective_message.reply_text('📢 目前没有待结算的广告 U。'); raise ApplicationHandlerStop
         rm=money(total*rate)
         with db() as c:
-            recdate=datetime.now(TZ).date().isoformat()
-            cur=c.execute("INSERT INTO calc_entries(created_at,chat_id,user_id,kind,amount,currency,category,label,raw_text,settled,record_date) VALUES(?,?,?,?,?,'RM','广告','广告U结算',?,1,?)",(now_iso(),update.effective_chat.id,update.effective_user.id,'expense',str(rm),text,recdate)); sid=cur.lastrowid
+            cur=c.execute("INSERT INTO calc_entries(created_at,chat_id,user_id,kind,amount,currency,category,label,raw_text,settled) VALUES(?,?,?,?,?,'RM','广告','广告U结算',?,1)",(now_iso(),update.effective_chat.id,update.effective_user.id,'expense',str(rm),text)); sid=cur.lastrowid
             ids=[r['id'] for r in rows]; c.executemany('UPDATE calc_entries SET settled=1,settlement_id=? WHERE id=?',[(sid,i) for i in ids])
         await update.effective_message.reply_text(f'💱 广告 U 结算\n{money(total):,.2f} U × {rate} = RM{rm:,.2f}\n\n✅ 已从公司资金扣除\n🏦 当前资金：RM{calc_balance():,.2f}')
         raise ApplicationHandlerStop
@@ -8571,26 +6836,31 @@ async def calc_text_router(update, context):
             raise ApplicationHandlerStop
 
     # + / - ledger, sign can be before amount or immediately before amount after label
+    payer=''
     m=re.fullmatch(r'\s*([+-])\s*([\d,]+(?:\.\d+)?)\s*(.*?)\s*',text)
     if not m:
-        m=re.fullmatch(r'\s*(.*?)\s*([+-])\s*([\d,]+(?:\.\d+)?)\s*',text)
-        if m: sign,amt,label=m.group(2),m.group(3),m.group(1)
-    else: sign,amt,label=m.group(1),m.group(2),m.group(3)
+        m=re.fullmatch(r'\s*(.*?)\s*([+-])\s*([\d,]+(?:\.\d+)?)\s*([LW])?\s*',text,re.I)
+        if m: sign,amt,label,payer=m.group(2),m.group(3),m.group(1),(m.group(4) or '').upper()
+    else:
+        sign,amt,label=m.group(1),m.group(2),m.group(3)
+        pm=re.search(r'(?i)(?:^|\s)([LW])\s*$',label)
+        if pm:
+            payer=pm.group(1).upper(); label=label[:pm.start()].strip()
     if m:
         amount=money(amt.replace(',','')); label=clean_label(label)
+        if payer:
+            label=f'{label}｜{payer}'
         # U/USD/USDT anywhere => U bucket; only negative U expenses supported as pending conversion
         is_u=bool(re.search(r'(?i)(?:USDT|USD|(?<![A-Z])U(?![A-Z]))',text))
         if is_u:
             label=clean_label(re.sub(r'(?i)USDT|USD|(?<![A-Z])U(?![A-Z])','',label)); category=classify_expense(label)
             kind='income' if sign=='+' else 'expense'
-            recdate=datetime.now(TZ).date().isoformat()
-            with db() as c: c.execute("INSERT INTO calc_entries(created_at,chat_id,user_id,kind,amount,currency,category,label,raw_text,settled,record_date) VALUES(?,?,?,?,?,'U',?,?,?,0,?)",(now_iso(),update.effective_chat.id,update.effective_user.id,kind,str(amount),category,label,text,recdate))
+            with db() as c: c.execute("INSERT INTO calc_entries(created_at,chat_id,user_id,kind,amount,currency,category,label,raw_text,settled) VALUES(?,?,?,?,?,'U',?,?,?,0)",(now_iso(),update.effective_chat.id,update.effective_user.id,kind,str(amount),category,label,text))
             await update.effective_message.reply_text(f"✅ 已记录 {'收入' if sign=='+' else '支出'}：{amount:,.2f} U｜{label}\n📢 U 先累计，结算汇率后才影响 RM 公司资金。")
         else:
             kind='income' if sign=='+' else 'expense'; category=label if kind=='income' else classify_expense(label)
-            recdate=datetime.now(TZ).date().isoformat()
             with db() as c:
-                cur=c.execute("INSERT INTO calc_entries(created_at,chat_id,user_id,kind,amount,currency,category,label,raw_text,settled,record_date) VALUES(?,?,?,?,?,'RM',?,?,?,1,?)",(now_iso(),update.effective_chat.id,update.effective_user.id,kind,str(amount),category,label,text,recdate)); eid=cur.lastrowid
+                cur=c.execute("INSERT INTO calc_entries(created_at,chat_id,user_id,kind,amount,currency,category,label,raw_text,settled) VALUES(?,?,?,?,?,'RM',?,?,?,1)",(now_iso(),update.effective_chat.id,update.effective_user.id,kind,str(amount),category,label,text)); eid=cur.lastrowid
             kb=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 撤销此笔',callback_data=f'ceundo:{eid}')]])
             msg=await update.effective_message.reply_text(f"{'➕ 收入' if sign=='+' else '➖ 支出'}\n金额：RM{amount:,.2f}\n项目：{label}\n余额：RM{calc_balance():,.2f}",reply_markup=kb)
             with db() as c: c.execute('INSERT OR REPLACE INTO calc_entry_receipts(entry_id,chat_id,message_id,source_message_id,created_at) VALUES(?,?,?,?,?)',(eid,update.effective_chat.id,msg.message_id,update.effective_message.message_id,now_iso()))
@@ -8631,19 +6901,20 @@ async def main():
     init_db()
     calc_init_db()
     tg = Application.builder().token(BOT_TOKEN).build()
-    # Company calculator: record company-group messages before any router can stop them.
-    tg.add_handler(MessageHandler(filters.TEXT & filters.Regex(re.compile(r"^\s*/?(?:(?:来过|來過)(?:\s*(?:fb|facebook|tk|tiktok|未注明))?|(?:fb|facebook|tk|tiktok|未注明)\s*(?:来过|來過))\s*$", re.I)), s_came_query_router), group=-1200)
-    tg.add_handler(MessageHandler(filters.TEXT & filters.Regex(re.compile(r"^\s*/?(?:完整|完整模式|来过完整|來過完整)\s*$", re.I)), s_came_mode_router), group=-1200)
-    tg.add_handler(CallbackQueryHandler(s_came_mode_callback, pattern=r'^camefmt:[sf]:\d+$'), group=-1200)
-    tg.add_handler(MessageHandler(filters.ALL, calc_message_audit_router), group=-1100)
+    # Company calculator: isolated to one bound group; existing handlers remain unchanged.
     tg.add_handler(MessageHandler(filters.ALL, universal_group_id_router), group=-1000)
+    tg.add_handler(CommandHandler("newlead", newbie_lead_cmd), group=-300)
+    tg.add_handler(CommandHandler("stop_newlead", stop_newbie_lead_cmd), group=-300)
+    tg.add_handler(CommandHandler("newlead_filter", newbie_filter_cmd), group=-300)
+    tg.add_handler(CommandHandler("stop_newlead_filter", stop_newbie_filter_cmd), group=-300)
+    tg.add_handler(MessageHandler((filters.TEXT | filters.CAPTION) & ~filters.COMMAND,
+                                  newbie_lead_router), group=-250)
     tg.add_handler(CommandHandler("calculator_here", calculator_here_cmd), group=-200)
     tg.add_handler(CommandHandler("fund_set", fund_set_cmd), group=-200)
     tg.add_handler(CommandHandler("balance", calc_balance_cmd), group=-200)
     tg.add_handler(CommandHandler("company", calc_company_cmd), group=-200)
     tg.add_handler(CommandHandler("kpi", calc_kpi_cmd), group=-200)
     tg.add_handler(CommandHandler("today", calc_today_cmd), group=-200)
-    tg.add_handler(CommandHandler("summary", calc_summary_cmd), group=-200)
     tg.add_handler(CommandHandler("report", calc_report_alias_cmd), group=-200)
     tg.add_handler(CommandHandler("week", calc_week_cmd), group=-200)
     tg.add_handler(CommandHandler("month", calc_month_cmd), group=-200)
@@ -8652,7 +6923,6 @@ async def main():
     tg.add_handler(CallbackQueryHandler(backup_confirm_source_callback, pattern=r'^bconfirmsrc:\d+$'), group=-311)
     tg.add_handler(CallbackQueryHandler(cardfee_callback, pattern=r'^cf(?:ok|cancel):\d+$'), group=-201)
     tg.add_handler(CallbackQueryHandler(calc_entry_callback, pattern=r'^ceundo:\d+$'), group=-201)
-    tg.add_handler(CallbackQueryHandler(lead_duplicate_confirm_callback, pattern=r'^ld(?:confirm|cancel):\d+$'), group=-1500)
     tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, calc_date_router), group=-202)
     tg.add_handler(MessageHandler(filters.TEXT, calc_text_router), group=-199)
     # Photo in a calculator group is evidence only; its caption can carry + / - ledger commands.
